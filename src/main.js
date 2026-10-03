@@ -476,6 +476,11 @@ export default async () => {
     );
     listenForRedraw(uiModel.showMsfsInvisibleMaterials);
 
+    uiModel.msfsNightLighting.subscribe(
+        (night) => (state.renderingParameters.msfsNightLighting = night)
+    );
+    listenForRedraw(uiModel.msfsNightLighting);
+
     uiModel.iblEnabled.subscribe((iblEnabled) => (state.renderingParameters.useIBL = iblEnabled));
     listenForRedraw(uiModel.iblEnabled);
 

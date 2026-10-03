@@ -69,6 +69,7 @@ class UIModel {
         this.gaussianSplattingEnabled = app.gaussianSplattingChanged.pipe();
         this.floatingPointFramebufferEnabled = app.floatingPointFramebufferChanged.pipe();
         this.showMsfsInvisibleMaterials = app.showMsfsInvisibleMaterialsChanged.pipe();
+        this.msfsNightLighting = app.msfsNightLightingChanged.pipe();
         this.iblEnabled = app.iblChanged.pipe();
         this.iblIntensity = app.iblIntensityChanged.pipe();
         this.punctualLightsEnabled = app.punctualLightsChanged.pipe();

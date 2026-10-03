@@ -681,6 +681,7 @@
                                 <b-switch v-model="floatingPointFramebuffer" :disabled="!supportsFloatingPointFramebuffer" v-on:input="floatingPointFramebufferChanged.next($event.target.checked)">Floating-Point Framebuffer</b-switch>
                                 <b-field label="MSFS" class="subtitle">
                                     <b-switch v-model="showMsfsInvisibleMaterials" v-on:input="showMsfsInvisibleMaterialsChanged.next($event.target.checked)">Show Invisible / Collision Meshes</b-switch>
+                                    <b-switch v-model="msfsNightLighting" v-on:input="msfsNightLightingChanged.next($event.target.checked)">Night Lighting</b-switch>
                                 </b-field>
                                 <b-field label="Current Camera Values" class="subtitle">
                                     <button v-on:click="cameraExport.next($event.target.value)" type="button" class="button is-rounded"><i
