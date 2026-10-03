@@ -471,6 +471,11 @@ export default async () => {
     );
     listenForRedraw(uiModel.floatingPointFramebufferEnabled);
 
+    uiModel.showMsfsInvisibleMaterials.subscribe(
+        (show) => (state.renderingParameters.showMsfsInvisibleMaterials = show)
+    );
+    listenForRedraw(uiModel.showMsfsInvisibleMaterials);
+
     uiModel.iblEnabled.subscribe((iblEnabled) => (state.renderingParameters.useIBL = iblEnabled));
     listenForRedraw(uiModel.iblEnabled);
 

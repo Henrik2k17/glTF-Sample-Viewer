@@ -679,6 +679,9 @@
                                 <b-switch v-model="nodeVisibilityEnabled" v-on:input="nodeVisibilityChanged.next($event.target.checked)">KHR_node_visibility</b-switch>
                                 <br>
                                 <b-switch v-model="floatingPointFramebuffer" :disabled="!supportsFloatingPointFramebuffer" v-on:input="floatingPointFramebufferChanged.next($event.target.checked)">Floating-Point Framebuffer</b-switch>
+                                <b-field label="MSFS" class="subtitle">
+                                    <b-switch v-model="showMsfsInvisibleMaterials" v-on:input="showMsfsInvisibleMaterialsChanged.next($event.target.checked)">Show Invisible / Collision Meshes</b-switch>
+                                </b-field>
                                 <b-field label="Current Camera Values" class="subtitle">
                                     <button v-on:click="cameraExport.next($event.target.value)" type="button" class="button is-rounded"><i
                                             class="fa fa-download downloadIcon"></i>Download as .gltf</button>
