@@ -107,23 +107,11 @@ export default async () => {
                     } else if (Array.isArray(model.mainFile)) {
                         const externalRefFunction = (uri) => {
                             return new Promise((resolve, reject) => {
-                                let foundFile = undefined;
-                                for (let i = 0; i < model.additionalFiles.length; i++) {
-                                    const file = model.additionalFiles[i];
-                                    let actualPath = uri;
-                                    if (!ResourceLoaderUtils.isAbsoluteUrl(uri)) {
-                                        const parentPath = ResourceLoaderUtils.getContainingFolder(
-                                            model.mainFile[0]
-                                        );
-                                        actualPath = ResourceLoaderUtils.cleanRelativePath(
-                                            parentPath + uri
-                                        );
-                                    }
-                                    if (file[0] == actualPath) {
-                                        foundFile = file[1];
-                                        break;
-                                    }
-                                }
+                                const foundFile = ResourceLoaderUtils.findFile(
+                                    model.additionalFiles,
+                                    uri,
+                                    model.mainFile[0]
+                                )?.[1];
                                 if (foundFile) {
                                     foundFile
                                         .arrayBuffer()
@@ -171,6 +159,13 @@ export default async () => {
                     .loadGltf(model.mainFile, model.additionalFiles, false)
                     .then((gltf) => {
                         state.gltf = gltf;
+                        const missingImages = gltf.images.filter((image) => !image.isLoaded());
+                        if (missingImages.length > 0) {
+                            app.warn(
+                                `${missingImages.length} of ${gltf.images.length} textures could not be loaded. ` +
+                                    "Drop the model together with its texture folder(s)."
+                            );
+                        }
                         const defaultScene = state.gltf.scene;
                         state.sceneIndex = defaultScene === undefined ? 0 : defaultScene;
                         state.cameraNodeIndex = undefined;
