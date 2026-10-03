@@ -70,6 +70,9 @@ class UIModel {
         this.floatingPointFramebufferEnabled = app.floatingPointFramebufferChanged.pipe();
         this.showMsfsInvisibleMaterials = app.showMsfsInvisibleMaterialsChanged.pipe();
         this.msfsNightLighting = app.msfsNightLightingChanged.pipe();
+        this.msfsAnimationFrame = app.msfsAnimationFrameChanged.pipe();
+        this.msfsAnimationPlayToggled = app.msfsAnimationPlayToggled.pipe();
+        this.msfsAnimationReset = app.msfsAnimationReset.pipe();
         this.iblEnabled = app.iblChanged.pipe();
         this.iblIntensity = app.iblIntensityChanged.pipe();
         this.punctualLightsEnabled = app.punctualLightsChanged.pipe();

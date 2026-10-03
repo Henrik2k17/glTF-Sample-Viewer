@@ -362,6 +362,29 @@
                                 <img src="assets/ui/Navigation_right_20px.svg" class="tabNavigationIcon" width="30px"
                                     @click="collapseActiveTab($event, 3)">
                                 <h2 class="title is-spaced" style="margin-bottom: 0.5em;">Animations</h2>
+                                <!-- MSFS models: animations are positioned by frame, like a sim variable drives them -->
+                                <template v-if="msfsAnimationMode">
+                                    <label class="subtitle">MSFS Animations</label>
+                                    <p class="msfsAnimInfo">{{ msfsAnimations.length }} animations &middot; {{ msfsFrameRate }} fps &middot; untouched animations stay in their rest pose</p>
+                                    <div class="msfsAnimToolbar">
+                                        <input class="input is-small" type="search" placeholder="Filter by name" v-model="msfsAnimationFilter">
+                                        <button class="button is-small is-rounded is-outlined" v-on:click="msfsAnimationReset.next(undefined)">Reset all</button>
+                                    </div>
+                                    <div v-for="animation in filteredMsfsAnimations" v-bind:key="animation.index" class="msfsAnimRow" v-bind:class="{ msfsAnimActive: animation.active }">
+                                        <div class="msfsAnimHeader">
+                                            <button class="button is-small msfsAnimPlay" v-bind:title="animation.playing ? 'Pause' : 'Play to the last frame'"
+                                                v-on:click="msfsAnimationPlayToggled.next(animation.index)">{{ animation.playing ? '&#10074;&#10074;' : '&#9654;' }}</button>
+                                            <span class="msfsAnimName" v-bind:title="animation.title">{{ animation.title }}</span>
+                                            <span class="msfsAnimFrame">{{ Math.round(animation.frame) }}&thinsp;/&thinsp;{{ animation.maxFrame }}</span>
+                                            <button class="button is-small msfsAnimResetBtn" title="Back to rest pose" v-bind:disabled="!animation.active"
+                                                v-on:click="msfsAnimationReset.next(animation.index)">&#8634;</button>
+                                        </div>
+                                        <input type="range" class="msfsAnimSlider" v-bind:min="animation.minFrame" v-bind:max="animation.maxFrame" step="1"
+                                            v-bind:value="animation.frame"
+                                            v-on:input="msfsAnimationFrameChanged.next({ index: animation.index, frame: Number($event.target.value) })">
+                                    </div>
+                                </template>
+                                <template v-if="!msfsAnimationMode">
                                 <label class="subtitle">Animation Controls</label>
                                 <!-- Play/Pause and Reset buttons -->
                                 <div style="display: flex; gap: 1em; align-items: center; margin-bottom: 1.5em; margin-top: 1em;">
@@ -387,6 +410,7 @@
                                         </b-checkbox>
                                     </div>
                                 </b-field>
+                                </template>
                             </div>
                             <div class="tabContent" v-if="showGraphsTab">
                                 <img src="assets/ui/Navigation_right_20px.svg" width="30px"

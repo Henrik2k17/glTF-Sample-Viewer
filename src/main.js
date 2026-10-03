@@ -1,4 +1,4 @@
-import { GltfView, ResourceLoaderUtils } from "@khronosgroup/gltf-viewer";
+import { GltfView, ResourceLoaderUtils, Msfs } from "@khronosgroup/gltf-viewer";
 
 import { UIModel } from "./logic/uimodel.js";
 import { app } from "./ui/ui.js";
@@ -190,11 +190,22 @@ export default async () => {
                             state.userCamera.zoomBy(distance);
 
                             state.animationIndices = [];
-                            for (let i = 0; i < gltf.animations.length; i++) {
-                                if (
-                                    !gltf.nonDisjointAnimations(state.animationIndices).includes(i)
-                                ) {
-                                    state.animationIndices.push(i);
+                            state.animationTimeOverrides.clear();
+                            if (Msfs.isMsfsAsset(gltf)) {
+                                // MSFS animations are driven by sim variables, not played as
+                                // clips: start in the rest pose and let the user scrub them.
+                                setupMsfsAnimations(gltf);
+                            } else {
+                                app.msfsAnimationMode = false;
+                                app.msfsAnimations = [];
+                                for (let i = 0; i < gltf.animations.length; i++) {
+                                    if (
+                                        !gltf
+                                            .nonDisjointAnimations(state.animationIndices)
+                                            .includes(i)
+                                    ) {
+                                        state.animationIndices.push(i);
+                                    }
                                 }
                             }
                             state.animationTimer.start();
@@ -708,12 +719,103 @@ export default async () => {
     });
     listenForRedraw(uiModel.moveSelection);
 
+    // MSFS animations: each animation is positioned by frame, like the sim variable driving it.
+    // Active animations (scrubbed or playing) are evaluated at their own time via
+    // state.animationTimeOverrides; all others stay in the rest pose.
+    function setupMsfsAnimations(gltf) {
+        const fps = Msfs.detectMsfsFrameRate(gltf);
+        app.msfsFrameRate = fps;
+        app.msfsAnimationFilter = "";
+        app.msfsAnimations = gltf.animations.map((animation, index) => {
+            animation.computeMinMaxTime(gltf);
+            const minFrame = Math.round((animation.minTime ?? 0) * fps);
+            const maxFrame = Math.round((animation.maxTime ?? 0) * fps);
+            return {
+                index,
+                title: animation.name ?? `Animation ${index}`,
+                minFrame,
+                maxFrame,
+                frame: minFrame,
+                playing: false,
+                active: false
+            };
+        });
+        app.msfsAnimationMode = true;
+    }
+
+    function applyMsfsAnimation(entry) {
+        const others = state.animationIndices.filter((index) => index !== entry.index);
+        if (entry.active) {
+            state.animationTimeOverrides.set(entry.index, entry.frame / app.msfsFrameRate);
+            state.animationIndices = [...others, entry.index];
+        } else {
+            state.animationTimeOverrides.delete(entry.index);
+            state.animationIndices = others;
+        }
+        redraw = true;
+    }
+
+    const findMsfsAnimation = (index) => app.msfsAnimations.find((entry) => entry.index === index);
+
+    uiModel.msfsAnimationFrame.subscribe(({ index, frame }) => {
+        const entry = findMsfsAnimation(index);
+        entry.frame = frame;
+        entry.active = true;
+        applyMsfsAnimation(entry);
+    });
+
+    uiModel.msfsAnimationPlayToggled.subscribe((index) => {
+        const entry = findMsfsAnimation(index);
+        entry.playing = !entry.playing;
+        entry.active = true;
+        if (entry.playing && entry.frame >= entry.maxFrame) {
+            entry.frame = entry.minFrame;
+        }
+        applyMsfsAnimation(entry);
+    });
+
+    // index undefined resets all animations
+    uiModel.msfsAnimationReset.subscribe((index) => {
+        for (const entry of app.msfsAnimations) {
+            if (index === undefined || entry.index === index) {
+                entry.playing = false;
+                entry.active = false;
+                entry.frame = entry.minFrame;
+                applyMsfsAnimation(entry);
+            }
+        }
+    });
+
+    let lastMsfsTick = undefined;
+    const advanceMsfsAnimations = () => {
+        const now = performance.now();
+        const deltaSeconds = lastMsfsTick === undefined ? 0 : (now - lastMsfsTick) / 1000;
+        lastMsfsTick = now;
+        let advanced = false;
+        for (const entry of app.msfsAnimations) {
+            if (!entry.playing) {
+                continue;
+            }
+            // Play once and hold the last frame, like a door or gear reaching its end position
+            let frame = entry.frame + deltaSeconds * app.msfsFrameRate;
+            if (frame >= entry.maxFrame) {
+                frame = entry.maxFrame;
+                entry.playing = false;
+            }
+            entry.frame = frame;
+            state.animationTimeOverrides.set(entry.index, frame / app.msfsFrameRate);
+            advanced = true;
+        }
+        return advanced;
+    };
+
     // configure the animation loop
     const past = {};
     const update = () => {
         const devicePixelRatio = window.devicePixelRatio || 1;
 
         redraw |= dragSmoother.tick();
+        redraw |= advanceMsfsAnimations();
 
         // set the size of the drawingBuffer based on the size it's displayed.
         canvas.width = Math.floor(canvas.clientWidth * devicePixelRatio);

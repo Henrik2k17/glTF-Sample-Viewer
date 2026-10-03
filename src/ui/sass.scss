@@ -488,3 +488,59 @@ input::-webkit-inner-spin-button {
 input:invalid {
     border-color: #ff3860;
 }
+// MSFS animation panel
+.msfsAnimInfo {
+    font-size: 13px;
+    opacity: 0.7;
+    margin-top: 0.25em;
+}
+.msfsAnimToolbar {
+    display: flex;
+    gap: 0.5em;
+    margin: 0.75em 0 1em 0;
+}
+.msfsAnimRow {
+    padding: 0.4em 0.5em;
+    margin-bottom: 0.35em;
+    border-left: 3px solid transparent;
+    border-radius: 3px;
+}
+.msfsAnimRow.msfsAnimActive {
+    border-left-color: #87c540;
+    background: #2f2f2f;
+}
+.msfsAnimHeader {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    font-size: 14px;
+}
+.msfsAnimName {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.msfsAnimFrame {
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    opacity: 0.8;
+}
+.button.msfsAnimPlay,
+.button.msfsAnimResetBtn {
+    width: 28px;
+    height: 24px;
+    padding: 0;
+    font-size: 11px;
+}
+.button.msfsAnimResetBtn {
+    background: transparent;
+    border: 1px solid #5a5a5a;
+    font-size: 14px;
+}
+.msfsAnimSlider {
+    width: 100%;
+    accent-color: #87c540;
+    margin-top: 0.3em;
+}

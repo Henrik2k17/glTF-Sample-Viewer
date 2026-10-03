@@ -57,6 +57,9 @@ const appCreated = createApp({
             floatingPointFramebufferChanged: new Subject(),
             showMsfsInvisibleMaterialsChanged: new Subject(),
             msfsNightLightingChanged: new Subject(),
+            msfsAnimationFrameChanged: new Subject(),
+            msfsAnimationPlayToggled: new Subject(),
+            msfsAnimationReset: new Subject(),
             renderEnvChanged: new Subject(),
             addEnvironmentChanged: new Subject(),
             selectedAnimationsChanged: new Subject(),
@@ -138,6 +141,11 @@ const appCreated = createApp({
             supportsFloatingPointFramebuffer: true,
             showMsfsInvisibleMaterials: false,
             msfsNightLighting: false,
+            // MSFS animation mode: one frame slider per animation instead of auto-play
+            msfsAnimationMode: false,
+            msfsAnimations: [],
+            msfsFrameRate: 30,
+            msfsAnimationFilter: "",
             morphing: true,
             interactivity: true,
             clearcoatEnabled: true,
@@ -285,6 +293,15 @@ const appCreated = createApp({
         });
     },
     computed: {
+        filteredMsfsAnimations() {
+            const filter = this.msfsAnimationFilter.trim().toLowerCase();
+            if (filter === "") {
+                return this.msfsAnimations;
+            }
+            return this.msfsAnimations.filter((animation) =>
+                animation.title.toLowerCase().includes(filter)
+            );
+        },
         hasInteractivityGraphs() {
             return this.graphs && this.graphs.length > 0;
         },
