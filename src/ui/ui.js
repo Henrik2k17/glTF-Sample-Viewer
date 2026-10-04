@@ -66,6 +66,12 @@ const appCreated = createApp({
             inspectorSelectionChanged: new Subject(),
             inspectorFocus: new Subject(),
             inspectorHighlightChanged: new Subject(),
+            modelReloadRequested: new Subject(),
+            textureFolderAdd: new Subject(),
+            textureFolderRemove: new Subject(),
+            textureFolderMove: new Subject(),
+            textureFolderRescan: new Subject(),
+            textureFolderAccess: new Subject(),
             renderEnvChanged: new Subject(),
             addEnvironmentChanged: new Subject(),
             selectedAnimationsChanged: new Subject(),
@@ -161,6 +167,9 @@ const appCreated = createApp({
             // sRGB hex from the colour picker; main.js converts it to linear for the renderer
             inspectorHighlightColor: "#ffb33f",
             inspectorHighlightStrength: 0.55,
+            // Texture lookup folders (logic/texture_folders.js rows)
+            textureFoldersSupported: true,
+            textureFolders: [],
             morphing: true,
             interactivity: true,
             clearcoatEnabled: true,
@@ -308,6 +317,9 @@ const appCreated = createApp({
         });
     },
     computed: {
+        textureFoldersNeedAccess() {
+            return this.textureFolders.some((folder) => folder.status === "needsAccess");
+        },
         inspectorOpen() {
             return this.activeTab === InspectorTab && !this.tabContentHidden;
         },
@@ -540,6 +552,18 @@ const appCreated = createApp({
                 this.tabContentHidden = false;
             }
             this.activeTab = item;
+        },
+        textureFolderStatus(folder) {
+            switch (folder.status) {
+                case "scanning":
+                    return "scanning…";
+                case "ready":
+                    return `${folder.fileCount.toLocaleString()}${folder.truncated ? "+" : ""} textures`;
+                case "needsAccess":
+                    return "access needed";
+                default:
+                    return `error: ${folder.error}`;
+            }
         },
         toggleInspectorNode(index) {
             this.inspectorExpanded[index] = !this.inspectorExpanded[index];

@@ -2,6 +2,7 @@ import { GltfView, ResourceLoaderUtils, Msfs } from "@khronosgroup/gltf-viewer";
 
 import { UIModel } from "./logic/uimodel.js";
 import { buildNodeTree, collectSubtree, getNodeDetails } from "./logic/inspector.js";
+import { TextureFolders } from "./logic/texture_folders.js";
 import { app } from "./ui/ui.js";
 import { EMPTY, from, merge } from "rxjs";
 import { mergeMap, map, share, catchError } from "rxjs/operators";
@@ -21,6 +22,15 @@ export default async () => {
 
     const view = new GltfView(context);
     const resourceLoader = view.createResourceLoader();
+
+    // Texture lookup folders: searched for textures a model references but doesn't ship with
+    const textureFolders = new TextureFolders((rows) => (app.textureFolders = rows));
+    app.textureFoldersSupported = TextureFolders.isSupported();
+    const textureFoldersRestored = textureFolders.restore();
+    resourceLoader.textureFileResolver = async (uri) => {
+        await textureFoldersRestored;
+        return textureFolders.resolve(uri);
+    };
     const state = view.createState();
 
     await state.physicsController.initializeEngine("NvidiaPhysX");
@@ -164,7 +174,9 @@ export default async () => {
                         if (missingImages.length > 0) {
                             app.warn(
                                 `${missingImages.length} of ${gltf.images.length} textures could not be loaded. ` +
-                                    "Drop the model together with its texture folder(s)."
+                                    (textureFolders.needsAccess()
+                                        ? "Allow access to your texture folders (Models tab), then reload the model."
+                                        : "Add their folder under Texture folders (Models tab), then reload the model.")
                             );
                         }
                         const defaultScene = state.gltf.scene;
@@ -721,6 +733,29 @@ export default async () => {
         state.hoverPositions[0].y = Math.floor(selection.y * devicePixelRatio);
     });
     listenForRedraw(uiModel.moveSelection);
+
+    // Folder picker and permission prompts need the click's user activation, so these
+    // handlers must call into TextureFolders synchronously (no await before it).
+    uiModel.textureFolderAdd.subscribe(async () => {
+        try {
+            const result = await textureFolders.add();
+            if (result === "added") {
+                app.$buefy.toast.open({
+                    message: "Texture folder added. Reload the model to use it.",
+                    type: "is-info"
+                });
+            } else if (result === "duplicate") {
+                app.warn("That folder is already in the list.");
+            }
+        } catch (error) {
+            console.error("Adding a texture folder failed", error);
+            app.error(`The folder could not be added: ${error?.name ?? "Error"}: ${error?.message ?? error}`, 10000);
+        }
+    });
+    uiModel.textureFolderAccess.subscribe(() => textureFolders.requestAccess());
+    uiModel.textureFolderRemove.subscribe((id) => textureFolders.remove(id));
+    uiModel.textureFolderMove.subscribe(({ id, offset }) => textureFolders.move(id, offset));
+    uiModel.textureFolderRescan.subscribe((id) => textureFolders.rescan(id));
 
     // Inspector: the selected node (and its subtree) is tinted in the view. While the tab is
     // open, clicking the model selects the part under the cursor; clicking empty space clears it.

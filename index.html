@@ -199,6 +199,39 @@
                                         </option>
                                     </b-select>
                                 </b-field>
+
+                                <!-- Texture lookup folders: searched for textures the model doesn't ship with -->
+                                <div class="textureFolders">
+                                    <label class="label">Texture folders</label>
+                                    <p class="textureFoldersInfo" v-if="!textureFoldersSupported">
+                                        Texture folders need folder access, available in Chrome and Edge.
+                                    </p>
+                                    <template v-else>
+                                        <p class="textureFoldersInfo">
+                                            Searched top to bottom (subfolders included) for textures that were not found next to the model.
+                                        </p>
+                                        <div v-for="(folder, folderIndex) in textureFolders" v-bind:key="folder.id" class="textureFolderRow">
+                                            <div class="textureFolderText">
+                                                <span class="textureFolderName" v-bind:title="folder.name">{{ folder.name }}</span>
+                                                <span class="textureFolderStatus" v-bind:class="'textureFolderStatus-' + folder.status">{{ textureFolderStatus(folder) }}</span>
+                                            </div>
+                                            <button class="button is-small textureFolderBtn" title="Move up" v-bind:disabled="folderIndex === 0"
+                                                v-on:click="textureFolderMove.next({ id: folder.id, offset: -1 })">&#9650;</button>
+                                            <button class="button is-small textureFolderBtn" title="Move down" v-bind:disabled="folderIndex === textureFolders.length - 1"
+                                                v-on:click="textureFolderMove.next({ id: folder.id, offset: 1 })">&#9660;</button>
+                                            <button class="button is-small textureFolderBtn" title="Rescan" v-bind:disabled="folder.status === 'needsAccess' || folder.status === 'scanning'"
+                                                v-on:click="textureFolderRescan.next(folder.id)">&#8635;</button>
+                                            <button class="button is-small textureFolderBtn" title="Remove"
+                                                v-on:click="textureFolderRemove.next(folder.id)">&#10005;</button>
+                                        </div>
+                                        <div class="textureFoldersToolbar">
+                                            <button class="button is-small is-rounded is-outlined" v-on:click="textureFolderAdd.next(undefined)">Add folder</button>
+                                            <button class="button is-small is-rounded textureFoldersAllow" v-if="textureFoldersNeedAccess"
+                                                v-on:click="textureFolderAccess.next(undefined)">Allow access</button>
+                                            <button class="button is-small is-rounded is-outlined" v-on:click="modelReloadRequested.next(undefined)">Reload model</button>
+                                        </div>
+                                    </template>
+                                </div>
                             </div>
                         </b-tab-item>
 

@@ -76,6 +76,11 @@ class UIModel {
         this.inspectorSelection = app.inspectorSelectionChanged.pipe();
         this.inspectorFocus = app.inspectorFocus.pipe();
         this.inspectorHighlight = app.inspectorHighlightChanged.pipe();
+        this.textureFolderAdd = app.textureFolderAdd.pipe();
+        this.textureFolderRemove = app.textureFolderRemove.pipe();
+        this.textureFolderMove = app.textureFolderMove.pipe();
+        this.textureFolderRescan = app.textureFolderRescan.pipe();
+        this.textureFolderAccess = app.textureFolderAccess.pipe();
         this.iblEnabled = app.iblChanged.pipe();
         this.iblIntensity = app.iblIntensityChanged.pipe();
         this.punctualLightsEnabled = app.punctualLightsChanged.pipe();
@@ -141,11 +146,20 @@ class UIModel {
             map((value) => ({ mainFile: value }))
         );
 
-        this.model = merge(
+        // "Reload model" re-emits the last model, e.g. after adding a texture folder
+        let lastModel = undefined;
+        const selectedModel = merge(
             dropdownGltfChanged,
             dropdownFlavourChanged,
             inputObservables.droppedGltf
+        ).pipe(
+            map((model) => {
+                lastModel = model;
+                return model;
+            }),
+            share()
         );
+        this.model = selectedModel;
 
         this.hdr = merge(
             selectedEnvironment,
@@ -194,7 +208,7 @@ class UIModel {
 
         this.variant = app.variantChanged.pipe();
 
-        // remove last filename
+        // remove last filename (not on a reload, which keeps the same model)
         this.model
             .pipe(filter(() => this.app.models.at(-1) === this.lastDroppedFilename))
             .subscribe(() => {
@@ -217,15 +231,22 @@ class UIModel {
         );
 
         if (modelURL !== null) {
-            const loadFromUrlObservable = new Observable((subscriber) =>
-                subscriber.next({ mainFile: modelURL })
-            );
+            const loadFromUrlObservable = new Observable((subscriber) => {
+                lastModel = { mainFile: modelURL };
+                subscriber.next(lastModel);
+            });
             droppedGLtfFileName = merge(
                 droppedGLtfFileName,
                 loadFromUrlObservable.pipe(map((data) => data.mainFile))
             );
             this.model = merge(this.model, loadFromUrlObservable);
         }
+
+        const reloadedModel = app.modelReloadRequested.pipe(
+            filter(() => lastModel !== undefined),
+            map(() => lastModel)
+        );
+        this.model = merge(this.model, reloadedModel);
 
         droppedGLtfFileName
             .pipe(filter((filename) => filename !== undefined))
