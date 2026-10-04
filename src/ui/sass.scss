@@ -109,6 +109,8 @@ nav.tabs
 nav.tabs ul
 {
     flex-shrink: unset;
+    // full height, so the pinned tabs (Credits, GitHub link) can sit at the bottom
+    min-height: 100%;
 }
 
 // highlighting of tabs
@@ -139,9 +141,13 @@ nav.tabs
 {
     margin-top: calc(100dvh * 0.11);
 }
-.tabs li:nth-child(7)
+// Credits and the GitHub link (added last in ui.js) are pinned to the bottom of the tab bar
+.tabs li.tabPinnedBottom
 {
     margin-top: auto;
+}
+.tabs ul > a:last-child
+{
     margin-bottom: calc(100dvh * 0.02);
 }
 
