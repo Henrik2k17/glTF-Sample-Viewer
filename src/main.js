@@ -17,10 +17,11 @@ import {
     MaterialEdits
 } from "./logic/materials.js";
 import { buildMsfsAnimationEntries, findAnimationsForNode, getAnimatedTargets } from "./logic/msfs_animations.js";
+import { summarizeValidation } from "./logic/validation_summary.js";
 import { TextureFolders } from "./logic/texture_folders.js";
 import { app } from "./ui/ui.js";
 import { EMPTY, Observable, from, merge } from "rxjs";
-import { mergeMap, map, share, catchError, switchMap } from "rxjs/operators";
+import { mergeMap, map, share, catchError, switchMap, tap } from "rxjs/operators";
 import { GltfModelPathProvider, fillEnvironmentWithPaths } from "./model_path_provider.js";
 
 export default async () => {
@@ -120,7 +121,9 @@ export default async () => {
                     additionalFiles: model.additionalFiles,
                     options: {
                         // TODO: Remove ignoredIssues once validator is updated to support KHR_gaussian_splatting extension
-                        ignoredIssues: ["MESH_PRIMITIVE_INVALID_ATTRIBUTE"]
+                        ignoredIssues: ["MESH_PRIMITIVE_INVALID_ATTRIBUTE"],
+                        // all messages, for the per-issue breakdown in the Validator tab
+                        maxIssues: 0
                     }
                 });
                 return () => worker.terminate();
@@ -210,6 +213,7 @@ export default async () => {
                         }
                         setupInspector(gltf, state.sceneIndex);
                         setupMaterials(gltf);
+                        refreshValidationSummary();
 
                         uiModel.exitLoadingState();
 
@@ -222,6 +226,7 @@ export default async () => {
                         state.cameraNodeIndex = undefined;
                         setupInspector(emptyGltf, 0);
                         setupMaterials(emptyGltf);
+                        refreshValidationSummary();
                         uiModel.exitLoadingState();
                         redraw = true;
                         return state;
@@ -627,7 +632,20 @@ export default async () => {
     });
 
     uiModel.attachGltfLoaded(gltfLoaded);
-    uiModel.updateValidationReport(validation);
+    // The breakdown names nodes and materials, so it is rebuilt when either the report or the
+    // model arrives (the validator often finishes after the model on large files).
+    let latestValidationReport = undefined;
+    function refreshValidationSummary() {
+        app.validationSummary = summarizeValidation(latestValidationReport, state.gltf);
+    }
+    uiModel.updateValidationReport(
+        validation.pipe(
+            tap((report) => {
+                latestValidationReport = report;
+                refreshValidationSummary();
+            })
+        )
+    );
     uiModel.updateStatistics(statisticsUpdateObservable);
     const sceneChangedStateObservable = uiModel.scene.pipe(map(() => state));
     uiModel.attachCameraChangeObservable(sceneChangedStateObservable);

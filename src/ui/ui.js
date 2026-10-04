@@ -138,6 +138,9 @@ const appCreated = createApp({
 
             validationReport: {},
             validationReportDescription: {},
+            // logic/validation_summary.js: {problems, expected, counts} for the Validator tab
+            validationSummary: undefined,
+            validationOpenGroups: {},
 
             ibl: true,
             iblIntensity: 0.0,
@@ -587,7 +590,8 @@ const appCreated = createApp({
         },
 
         getValidationCounter: function () {
-            const infoDiv = this.getValidationInfoDiv(this.validationReport?.issues);
+            // Expected and harmless messages (see validation_summary.js) do not count
+            const infoDiv = this.getValidationInfoDiv(this.validationSummary?.counts ?? this.validationReport?.issues);
             if (this.tabContentHidden === false && this.activeTab === 2) {
                 return (
                     `<div style="position:relative; width:50px; height:100%">` +
@@ -723,6 +727,16 @@ const appCreated = createApp({
             this.$nextTick(() => {
                 document.getElementById(`msfsAnimRow${indices[0]}`)?.scrollIntoView({ block: "nearest" });
             });
+        },
+        toggleValidationGroup(key) {
+            this.validationOpenGroups[key] = !this.validationOpenGroups[key];
+        },
+        showValidationItem(item) {
+            if (item.node !== undefined) {
+                this.showInspectorNode(item.node);
+            } else if (item.material !== undefined) {
+                this.showMaterial(item.material);
+            }
         },
         // Switches to a sidebar tab by clicking its header, as the user would.
         showTab(id) {

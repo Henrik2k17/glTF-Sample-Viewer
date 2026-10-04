@@ -15,8 +15,14 @@ async function validate({ mainFile, additionalFiles, options }) {
         return await validateBytes(new Uint8Array(buffer), {
             ...options,
             uri: mainFile,
-            externalResourceFunction: async (uri) =>
-                new Uint8Array(await (await fetch(parent + uri)).arrayBuffer())
+            externalResourceFunction: async (uri) => {
+                const resource = await fetch(parent + uri);
+                if (!resource.ok) {
+                    // reported as IO_ERROR instead of validating the server's error page
+                    throw `${resource.status} ${resource.statusText}`;
+                }
+                return new Uint8Array(await resource.arrayBuffer());
+            }
         });
     }
     const buffer = await mainFile[1].arrayBuffer();

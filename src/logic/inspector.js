@@ -265,7 +265,36 @@ function primitiveRows(gltf, primitive) {
         rows.push(["Mode", PrimitiveModes[mode] ?? String(mode)]);
     }
     rows.push(["Attributes", Object.keys(primitive.attributes ?? {}).join(", ")]);
+    const colors = vertexColorRange(gltf, primitive);
+    if (colors !== undefined) {
+        rows.push(["Vertex colors", colors]);
+    }
     return rows;
+}
+
+// Per channel value range of COLOR_0, flagged when clearly outside 0..1 (broken export data;
+// a little above 1 is rounding). Vertex alpha is the detail map mask in MSFS materials.
+function vertexColorRange(gltf, primitive) {
+    const accessor = gltf.accessors[primitive.attributes?.COLOR_0];
+    if (accessor === undefined) {
+        return undefined;
+    }
+    const data = accessor.getNormalizedDeinterlacedView(gltf);
+    const channels = accessor.getComponentCount(accessor.type);
+    const min = new Array(channels).fill(Infinity);
+    const max = new Array(channels).fill(-Infinity);
+    for (let i = 0; i < data.length; i++) {
+        const c = i % channels;
+        min[c] = Math.min(min[c], data[i]);
+        max[c] = Math.max(max[c], data[i]);
+    }
+    const names = ["R", "G", "B", "A"];
+    const ranges = min.map((value, c) => {
+        const [low, high] = [formatNumber(value), formatNumber(max[c])];
+        return low === high ? `${names[c]} ${low}` : `${names[c]} ${low}–${high}`;
+    });
+    const broken = min.some((value) => value < -0.06) || max.some((value) => value > 1.06);
+    return (broken ? "⚠ outside 0–1: " : "") + ranges.join(" · ");
 }
 
 function materialSections(gltf, materialIndex) {

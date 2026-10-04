@@ -366,8 +366,57 @@
                                         <p>Number of infos: {{validationReport?.issues?.numInfos ?? 0}}</p>
                                     </div>
 
-                                    <div v-show='validationReportDescription.message !== undefined && validationReportDescription?.message !== ""'>
-                                        <p style="margin-top: 10px; margin-bottom: 10px; font-size:smaller;">{{validationReportDescription?.message}}</p>
+                                    <div v-if="validationSummary" class="validationSummary">
+                                        <div class="validationSectionTitle">
+                                            Needs attention
+                                            <span class="validationSectionCount" title="Affected parts, materials and files; the number of messages is in brackets">{{ validationSummary.counts.numErrors }} errors &middot; {{ validationSummary.counts.numWarnings }} warnings ({{ validationSummary.messageCount.toLocaleString() }} messages)</span>
+                                        </div>
+                                        <p v-if="validationSummary.problems.length === 0" class="validationNote">Nothing beyond the expected messages below.</p>
+                                        <div v-for="group in validationSummary.problems" v-bind:key="group.key" class="validationGroup">
+                                            <div class="validationGroupHeader" v-on:click="toggleValidationGroup(group.key)">
+                                                <span class="validationToggle">{{ validationOpenGroups[group.key] ? '&#9662;' : '&#9656;' }}</span>
+                                                <span class="validationSeverity" v-bind:class="'validationSeverity-' + group.severity">{{ group.severity }}</span>
+                                                <span class="validationLabel" v-bind:title="group.code">{{ group.label }}</span>
+                                                <span class="validationCount">{{ group.count.toLocaleString() }}</span>
+                                            </div>
+                                            <div v-if="validationOpenGroups[group.key]" class="validationGroupBody">
+                                                <p v-if="group.note" class="validationNote">{{ group.note }}</p>
+                                                <div v-for="item in group.items.slice(0, 100)" v-bind:key="item.pointer" class="validationItem"
+                                                    v-bind:class="{ validationItemLink: item.node !== undefined || item.material !== undefined }"
+                                                    v-bind:title="item.pointer + '\n' + item.message"
+                                                    v-on:click="showValidationItem(item)">
+                                                    <span class="validationItemText">{{ item.text }}</span>
+                                                    <span class="validationItemRange" v-if="item.range">{{ item.range }}</span>
+                                                    <span class="validationItemCount" v-if="item.count > 1">&times;{{ item.count }}</span>
+                                                </div>
+                                                <p v-if="group.items.length > 100" class="validationNote">and {{ group.items.length - 100 }} more</p>
+                                            </div>
+                                        </div>
+                                        <div class="validationSectionTitle" v-if="validationSummary.expected.length > 0">
+                                            Expected for MSFS exports / harmless
+                                        </div>
+                                        <div v-for="group in validationSummary.expected" v-bind:key="group.key" class="validationGroup">
+                                            <div class="validationGroupHeader" v-on:click="toggleValidationGroup(group.key)">
+                                                <span class="validationToggle">{{ validationOpenGroups[group.key] ? '&#9662;' : '&#9656;' }}</span>
+                                                <span class="validationSeverity" v-bind:class="'validationSeverity-' + group.severity">{{ group.severity }}</span>
+                                                <span class="validationLabel" v-bind:title="group.code">{{ group.label }}</span>
+                                                <span class="validationCount">{{ group.count.toLocaleString() }}</span>
+                                            </div>
+                                            <div v-if="validationOpenGroups[group.key]" class="validationGroupBody">
+                                                <p v-if="group.note" class="validationNote">{{ group.note }}</p>
+                                                <div v-for="item in group.items.slice(0, 100)" v-bind:key="item.pointer" class="validationItem"
+                                                    v-bind:class="{ validationItemLink: item.node !== undefined || item.material !== undefined }"
+                                                    v-bind:title="item.pointer + '\n' + item.message"
+                                                    v-on:click="showValidationItem(item)">
+                                                    <span class="validationItemText">{{ item.text }}</span>
+                                                    <span class="validationItemRange" v-if="item.range">{{ item.range }}</span>
+                                                    <span class="validationItemCount" v-if="item.count > 1">&times;{{ item.count }}</span>
+                                                </div>
+                                                <p v-if="group.items.length > 100" class="validationNote">and {{ group.items.length - 100 }} more</p>
+                                            </div>
+                                        </div>
+                                        <p class="validationNote" v-if="validationSummary.truncated">The validator stopped early; the list is incomplete.</p>
+                                        <p class="validationNote">Click an entry to show the part or material. The full report is in Copy / Download.</p>
                                     </div>
 
                                     <div v-show="validationReport?.error !== undefined">

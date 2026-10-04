@@ -1219,3 +1219,106 @@ $checker: repeating-conic-gradient(#555 0% 25%, #3a3a3a 0% 50%) 50% / 12px 12px;
     object-fit: contain;
     image-rendering: pixelated;
 }
+
+/* Validator tab: issue breakdown */
+.validationSummary {
+    margin: 0.75em 0 1em 0;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+.validationSectionTitle {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5em;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.8;
+    border-bottom: 1px solid #3a3a3a;
+    margin: 0.9em 0 0.3em 0;
+}
+.validationSectionCount {
+    font-weight: normal;
+    text-transform: none;
+    letter-spacing: normal;
+    opacity: 0.8;
+}
+.validationGroupHeader {
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 2px 4px;
+    cursor: pointer;
+    user-select: none;
+}
+.validationGroupHeader:hover {
+    background: #2f2f2f;
+}
+.validationToggle {
+    flex: 0 0 12px;
+    text-align: center;
+    opacity: 0.7;
+}
+.validationSeverity {
+    flex: 0 0 auto;
+    font-size: 10px;
+    line-height: 14px;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: #3d3d3d;
+    color: #cfcfcf;
+}
+.validationSeverity-error {
+    background: #4a2a2a;
+    color: #ffb3b3;
+}
+.validationSeverity-warning {
+    background: #5c4b14;
+    color: #ffe08a;
+}
+.validationLabel {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.validationCount {
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+}
+.validationGroupBody {
+    margin: 0 0 0.5em 20px;
+}
+.validationNote {
+    font-size: 12px;
+    opacity: 0.7;
+    margin: 0.2em 0;
+}
+.validationItem {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4em;
+    font-size: 12px;
+    padding: 1px 4px;
+    border-left: 2px solid #3a3a3a;
+}
+.validationItemLink {
+    cursor: pointer;
+}
+.validationItemLink:hover {
+    background: #2f2f2f;
+    border-left-color: #87c540;
+}
+.validationItemText {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.validationItemRange,
+.validationItemCount {
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.7;
+}
