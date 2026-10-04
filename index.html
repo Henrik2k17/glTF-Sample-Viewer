@@ -819,6 +819,8 @@
                                 <b-field label="MSFS" class="subtitle">
                                     <b-switch v-model="showMsfsInvisibleMaterials" v-on:input="showMsfsInvisibleMaterialsChanged.next($event.target.checked)">Show Invisible / Collision Meshes</b-switch>
                                     <b-switch v-model="msfsNightLighting" v-on:input="msfsNightLightingChanged.next($event.target.checked)">Night Lighting</b-switch>
+                                    <b-switch v-model="showMsfsColliders" v-on:input="showMsfsCollidersChanged.next($event.target.checked)">Show Collision Gizmos</b-switch>
+                                    <b-switch v-model="showMsfsLights" v-on:input="showMsfsLightsChanged.next($event.target.checked)">Show Lights</b-switch>
                                 </b-field>
                                 <b-field label="Current Camera Values" class="subtitle">
                                     <button v-on:click="cameraExport.next($event.target.value)" type="button" class="button is-rounded"><i

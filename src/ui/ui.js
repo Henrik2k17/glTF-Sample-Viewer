@@ -60,6 +60,8 @@ const appCreated = createApp({
             floatingPointFramebufferChanged: new Subject(),
             showMsfsInvisibleMaterialsChanged: new Subject(),
             msfsNightLightingChanged: new Subject(),
+            showMsfsCollidersChanged: new Subject(),
+            showMsfsLightsChanged: new Subject(),
             msfsAnimationFrameChanged: new Subject(),
             msfsAnimationPlayToggled: new Subject(),
             msfsAnimationReset: new Subject(),
@@ -153,6 +155,8 @@ const appCreated = createApp({
             supportsFloatingPointFramebuffer: true,
             showMsfsInvisibleMaterials: false,
             msfsNightLighting: false,
+            showMsfsColliders: true,
+            showMsfsLights: true,
             // MSFS animation mode: one frame slider per animation instead of auto-play
             msfsAnimationMode: false,
             msfsAnimations: [],

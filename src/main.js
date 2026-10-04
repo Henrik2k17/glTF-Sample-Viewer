@@ -507,6 +507,14 @@ export default async () => {
     );
     listenForRedraw(uiModel.msfsNightLighting);
 
+    uiModel.showMsfsColliders.subscribe(
+        (show) => (state.renderingParameters.showMsfsColliders = show)
+    );
+    listenForRedraw(uiModel.showMsfsColliders);
+
+    uiModel.showMsfsLights.subscribe((show) => (state.renderingParameters.showMsfsLights = show));
+    listenForRedraw(uiModel.showMsfsLights);
+
     uiModel.iblEnabled.subscribe((iblEnabled) => (state.renderingParameters.useIBL = iblEnabled));
     listenForRedraw(uiModel.iblEnabled);
 
