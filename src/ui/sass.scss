@@ -494,55 +494,200 @@ input:invalid {
     opacity: 0.7;
     margin-top: 0.25em;
 }
-.msfsAnimToolbar {
-    display: flex;
-    gap: 0.5em;
-    margin: 0.75em 0 1em 0;
+// Control dock: stays at the top while the list scrolls
+.msfsAnimDock {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    margin: 0.75em 0;
+    padding: 0.6em 0.7em;
+    background: #2b2b2b;
+    border: 1px solid #3f3f3f;
+    border-left: 3px solid #87c540;
+    border-radius: 4px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
 }
-.msfsAnimRow {
-    padding: 0.4em 0.5em;
-    margin-bottom: 0.35em;
-    border-left: 3px solid transparent;
-    border-radius: 3px;
+.msfsAnimDockTitle {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
 }
-.msfsAnimRow.msfsAnimActive {
-    border-left-color: #87c540;
-    background: #2f2f2f;
+.msfsAnimDockGroup {
+    font-weight: normal;
+    opacity: 0.65;
 }
-.msfsAnimHeader {
+.msfsAnimDockNames {
+    font-size: 12px;
+    font-weight: normal;
+    opacity: 0.75;
+    max-height: 3.9em;
+    overflow-y: auto;
+}
+.msfsAnimDockHint {
+    font-size: 13px;
+    opacity: 0.75;
+}
+.msfsAnimDockControls {
     display: flex;
     align-items: center;
-    gap: 0.5em;
-    font-size: 14px;
+    gap: 0.25em;
+    margin-top: 0.5em;
 }
-.msfsAnimName {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.msfsAnimFrame {
-    font-variant-numeric: tabular-nums;
-    font-size: 12px;
-    opacity: 0.8;
-}
-.button.msfsAnimPlay,
-.button.msfsAnimResetBtn {
+.button.msfsAnimBtn {
     width: 28px;
-    height: 24px;
+    height: 26px;
     padding: 0;
     font-size: 11px;
+    background: #3a3a3a;
+    border: 1px solid #555;
+    color: #f2f2f2;
 }
-.button.msfsAnimResetBtn {
-    background: transparent;
-    border: 1px solid #5a5a5a;
+.button.msfsAnimBtn.msfsAnimPlayBtn {
+    width: 36px;
+    background: #87c540;
+    border-color: #87c540;
+    color: #1e1e1e;
+}
+.button.msfsAnimBtn.msfsAnimResetBtn {
+    margin-left: auto;
     font-size: 14px;
+}
+.msfsAnimDockFrame {
+    margin-left: 0.4em;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.msfsAnimFrameInput {
+    width: 4.2em;
+    font-size: 12px;
+    background: #1e1e1e;
+    color: #f2f2f2;
+    border: 1px solid #4a4a4a;
+    border-radius: 3px;
+    padding: 0 3px;
 }
 .msfsAnimSlider {
     width: 100%;
     accent-color: #87c540;
+    margin-top: 0.4em;
+}
+.msfsAnimDockOptions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4em 0.75em;
     margin-top: 0.3em;
+    font-size: 12px;
+}
+.msfsAnimDockOptions label {
+    white-space: nowrap;
+}
+.msfsAnimDockOptions select {
+    background: #3a3a3a;
+    border-color: #555;
+    color: #f2f2f2;
+}
+.msfsAnimDockOptions input,
+.msfsAnimActiveOnly input {
+    accent-color: #87c540;
+    vertical-align: middle;
+}
+.msfsAnimClear {
+    margin-left: auto;
+    color: #87c540;
+}
+.msfsAnimToolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    margin-bottom: 0.4em;
+}
+.msfsAnimActiveOnly {
+    flex: 0 0 auto;
+    font-size: 13px;
+}
+.msfsAnimToolbarButtons {
+    justify-content: flex-end;
+    margin-bottom: 0.6em;
+}
+.msfsAnimList {
+    border: 1px solid #3a3a3a;
+    border-radius: 3px;
+    font-size: 13px;
+}
+.msfsAnimGroup {
+    display: flex;
+    align-items: center;
+    gap: 0.35em;
+    padding: 3px 6px;
+    background: #2a2a2a;
+    border-bottom: 1px solid #333;
+    cursor: pointer;
+    user-select: none;
+    font-weight: 600;
+}
+.msfsAnimGroup:hover {
+    background: #313131;
+}
+.msfsAnimGroupToggle {
+    flex: 0 0 12px;
+    text-align: center;
+    opacity: 0.7;
+    font-weight: normal;
+}
+.msfsAnimGroupName {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.msfsAnimGroupCount {
+    font-size: 11px;
+    font-weight: normal;
+    opacity: 0.6;
+}
+.msfsAnimRow {
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 2px 6px 2px 20px;
+    border-left: 3px solid transparent;
+    cursor: pointer;
+    user-select: none;
+}
+.msfsAnimRow:hover {
+    background: #2f2f2f;
+}
+.msfsAnimRow.msfsAnimRowSelected {
+    background: #3a3226;
+    border-left-color: #ff8a1e;
+}
+.msfsAnimRowName {
+    flex: 1;
+    min-width: 0;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
+.msfsAnimRow.msfsAnimRowActive .msfsAnimRowName {
+    color: #c3e88d;
+}
+.msfsAnimRowPlaying {
+    flex: 0 0 auto;
+    font-size: 9px;
+    color: #87c540;
+}
+.msfsAnimRowBar {
+    flex: 0 0 44px;
+    height: 5px;
+    background: #3d3d3d;
+    border-radius: 3px;
+    overflow: hidden;
+}
+.msfsAnimRowBar span {
+    display: block;
+    height: 100%;
+    background: #87c540;
 }
 
 /* Inspector tab */
@@ -559,14 +704,14 @@ input:invalid {
 .inspectorToolbar .button {
     min-width: 28px;
 }
-.inspectorHighlightSettings {
+.highlightSettings {
     display: flex;
     align-items: center;
     gap: 0.5em;
-    margin-bottom: 0.5em;
+    margin: 0.25em 0 1em 0;
     font-size: 13px;
 }
-.inspectorHighlightSettings input[type="color"] {
+.highlightSettings input[type="color"] {
     width: 32px;
     height: 22px;
     padding: 0;
@@ -575,12 +720,12 @@ input:invalid {
     background: transparent;
     cursor: pointer;
 }
-.inspectorHighlightStrength {
+.highlightStrength {
     flex: 1;
     min-width: 0;
     accent-color: #87c540;
 }
-.inspectorHighlightValue {
+.highlightValue {
     flex: 0 0 3em;
     text-align: right;
     font-variant-numeric: tabular-nums;

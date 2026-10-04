@@ -72,12 +72,12 @@ class UIModel {
         this.msfsNightLighting = app.msfsNightLightingChanged.pipe();
         this.showMsfsColliders = app.showMsfsCollidersChanged.pipe();
         this.showMsfsLights = app.showMsfsLightsChanged.pipe();
-        this.msfsAnimationFrame = app.msfsAnimationFrameChanged.pipe();
-        this.msfsAnimationPlayToggled = app.msfsAnimationPlayToggled.pipe();
+        this.msfsAnimationSelection = app.msfsAnimationSelectionChanged.pipe();
+        this.msfsAnimationControl = app.msfsAnimationControl.pipe();
         this.msfsAnimationReset = app.msfsAnimationReset.pipe();
         this.inspectorSelection = app.inspectorSelectionChanged.pipe();
         this.inspectorFocus = app.inspectorFocus.pipe();
-        this.inspectorHighlight = app.inspectorHighlightChanged.pipe();
+        this.highlight = app.highlightChanged.pipe();
         this.materialSelection = app.materialSelectionChanged.pipe();
         this.materialView = app.materialViewChanged.pipe();
         this.materialFactor = app.materialFactorChanged.pipe();
@@ -527,7 +527,12 @@ const getInputObservables = (inputElement, app) => {
                 Math.hypot(event.pageX - mouseDownPosition.x, event.pageY - mouseDownPosition.y) <= 4
         ),
         map((clickEvent) => {
-            return { x: clickEvent.pageX, y: clickEvent.pageY };
+            return {
+                x: clickEvent.pageX,
+                y: clickEvent.pageY,
+                // for adding to a selection in tabs that support several selected items
+                additive: clickEvent.ctrlKey || clickEvent.metaKey || clickEvent.shiftKey
+            };
         })
     );
 

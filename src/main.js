@@ -16,6 +16,7 @@ import {
     getMaterialUsage,
     MaterialEdits
 } from "./logic/materials.js";
+import { buildMsfsAnimationEntries, findAnimationsForNode, getAnimatedTargets } from "./logic/msfs_animations.js";
 import { TextureFolders } from "./logic/texture_folders.js";
 import { app } from "./ui/ui.js";
 import { EMPTY, Observable, from, merge } from "rxjs";
@@ -182,6 +183,7 @@ export default async () => {
                             } else {
                                 app.msfsAnimationMode = false;
                                 app.msfsAnimations = [];
+                                selectMsfsAnimations([]);
                                 for (let i = 0; i < gltf.animations.length; i++) {
                                     if (
                                         !gltf
@@ -700,6 +702,7 @@ export default async () => {
         state.selectionPositions[0].x = Math.floor(selection.x * devicePixelRatio);
         state.selectionPositions[0].y = Math.floor(selection.y * devicePixelRatio);
         state.triggerSelection = true;
+        selectionAdditive = selection.additive === true;
     });
     listenForRedraw(uiModel.selection);
 
@@ -738,6 +741,22 @@ export default async () => {
     uiModel.textureFolderMove.subscribe(({ id, offset }) => textureFolders.move(id, offset));
     uiModel.textureFolderRescan.subscribe((id) => textureFolders.rescan(id));
 
+    // Tinted nodes and materials come from several tabs; the renderer gets their union.
+    const highlights = {
+        inspectorNodes: new Set(),
+        animationNodes: new Set(),
+        materialsMaterials: new Set(),
+        animationMaterials: new Set()
+    };
+    function refreshHighlights() {
+        state.highlightedNodeIndices = new Set([...highlights.inspectorNodes, ...highlights.animationNodes]);
+        state.highlightedMaterialIndices = new Set([
+            ...highlights.materialsMaterials,
+            ...highlights.animationMaterials
+        ]);
+        redraw = true;
+    }
+
     // Inspector: the selected node (and its subtree) is tinted in the view. While the tab is
     // open, clicking the model selects the part under the cursor; clicking empty space clears it.
     function setupInspector(gltf, sceneIndex) {
@@ -757,21 +776,22 @@ export default async () => {
         if (index === undefined || state.gltf?.nodes[index] === undefined) {
             app.inspectorSelected = undefined;
             app.inspectorDetails = [];
-            state.highlightedNodeIndices = new Set();
+            highlights.inspectorNodes = new Set();
         } else {
             app.inspectorDetails = getNodeDetails(state.gltf, index);
-            state.highlightedNodeIndices = collectSubtree(state.gltf, index);
+            highlights.inspectorNodes = collectSubtree(state.gltf, index);
         }
-        redraw = true;
+        refreshHighlights();
     }
 
     uiModel.inspectorSelection.subscribe((index) => selectInspectorNode(index));
 
-    // Highlight colour: the picker gives sRGB, the shader blends in linear space.
+    // Highlight colour (Display tab): the picker gives sRGB, the shader blends in linear space.
     // Remembered per browser; storage may be unavailable (private mode), so it is optional.
-    const HighlightStorageKey = "inspectorHighlight";
+    const HighlightStorageKey = "highlight";
+    const LegacyHighlightStorageKey = "inspectorHighlight";
     const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
-    const applyInspectorHighlight = ({ color, strength }) => {
+    const applyHighlight = ({ color, strength }) => {
         const match = /^#([0-9a-f]{6})$/i.exec(color ?? "");
         if (!match || !(strength >= 0 && strength <= 1)) {
             return false;
@@ -781,17 +801,20 @@ export default async () => {
             srgbToLinear(((value >> shift) & 0xff) / 255)
         );
         state.renderingParameters.highlightStrength = strength;
-        app.inspectorHighlightColor = color.toLowerCase();
-        app.inspectorHighlightStrength = strength;
+        app.highlightColor = color.toLowerCase();
+        app.highlightStrength = strength;
         return true;
     };
     try {
-        applyInspectorHighlight(JSON.parse(window.localStorage.getItem(HighlightStorageKey)) ?? {});
+        const stored =
+            window.localStorage.getItem(HighlightStorageKey) ??
+            window.localStorage.getItem(LegacyHighlightStorageKey);
+        applyHighlight(JSON.parse(stored) ?? {});
     } catch {
         // keep the default highlight
     }
-    uiModel.inspectorHighlight.subscribe((highlight) => {
-        if (!applyInspectorHighlight(highlight)) {
+    uiModel.highlight.subscribe((highlight) => {
+        if (!applyHighlight(highlight)) {
             return;
         }
         try {
@@ -800,7 +823,7 @@ export default async () => {
             // not remembered, still applied
         }
     });
-    listenForRedraw(uiModel.inspectorHighlight);
+    listenForRedraw(uiModel.highlight);
 
     uiModel.inspectorFocus.subscribe((index) => {
         if (state.gltf === undefined || state.cameraNodeIndex !== undefined) {
@@ -810,7 +833,39 @@ export default async () => {
         redraw = true;
     });
 
+    // Ctrl/Cmd/Shift held on the last viewport click (see uiModel.selection)
+    let selectionAdditive = false;
     state.selectionCallback = (pickingResult) => {
+        if (app.animationsOpen && app.msfsAnimationMode) {
+            const nodeIndex = pickingResult.node?.gltfObjectIndex;
+            if (nodeIndex === undefined) {
+                // A click into empty space clears the selection, unless it was meant to add.
+                if (!selectionAdditive) {
+                    selectMsfsAnimations([]);
+                }
+                return;
+            }
+            const found = findAnimationsForNode(state.gltf, app.msfsAnimations, nodeIndex);
+            const name = state.gltf.nodes[nodeIndex].name ?? `Node ${nodeIndex}`;
+            if (selectionAdditive) {
+                // Add the part's animations; Ctrl-clicking a part whose animations are all
+                // selected already removes them again.
+                const current = app.msfsAnimationSelected;
+                const allSelected = found.length > 0 && found.every((index) => current.includes(index));
+                selectMsfsAnimations(
+                    allSelected
+                        ? current.filter((index) => !found.includes(index))
+                        : [...current, ...found.filter((index) => !current.includes(index))]
+                );
+            } else {
+                selectMsfsAnimations(found);
+            }
+            app.msfsAnimationPickInfo = found.length === 0 ? `No animation moves ${name}.` : "";
+            if (found.length > 0) {
+                app.revealMsfsAnimations(found);
+            }
+            return;
+        }
         if (app.materialsOpen) {
             const mesh = state.gltf.meshes[pickingResult.node?.mesh];
             const material = mesh?.primitives[pickingResult.primitiveIndex]?.material;
@@ -874,12 +929,11 @@ export default async () => {
 
     function applyMaterialView() {
         const index = app.materialsSelected;
-        state.highlightedMaterialIndices =
-            index !== undefined && app.materialHighlight ? new Set([index]) : new Set();
+        highlights.materialsMaterials = index !== undefined && app.materialHighlight ? new Set([index]) : new Set();
         // A new set each time: the renderer rebuilds its draw lists when the reference changes.
         state.isolatedMaterialIndices =
             index !== undefined && app.materialIsolate ? new Set([index]) : undefined;
-        redraw = true;
+        refreshHighlights();
     }
 
     function refreshMaterialDetails() {
@@ -1051,26 +1105,17 @@ export default async () => {
 
     // MSFS animations: each animation is positioned by frame, like the sim variable driving it.
     // Active animations (scrubbed or playing) are evaluated at their own time via
-    // state.animationTimeOverrides; all others stay in the rest pose.
+    // state.animationTimeOverrides; all others stay in the rest pose. The dock controls the
+    // selected animations together.
     function setupMsfsAnimations(gltf) {
         const fps = Msfs.detectMsfsFrameRate(gltf);
         app.msfsFrameRate = fps;
         app.msfsAnimationFilter = "";
-        app.msfsAnimations = gltf.animations.map((animation, index) => {
-            animation.computeMinMaxTime(gltf);
-            const minFrame = Math.round((animation.minTime ?? 0) * fps);
-            const maxFrame = Math.round((animation.maxTime ?? 0) * fps);
-            return {
-                index,
-                title: animation.name ?? `Animation ${index}`,
-                minFrame,
-                maxFrame,
-                frame: minFrame,
-                playing: false,
-                active: false
-            };
-        });
+        app.msfsAnimationActiveOnly = false;
+        app.msfsAnimationGroupsOpen = {};
+        app.msfsAnimations = buildMsfsAnimationEntries(gltf, fps);
         app.msfsAnimationMode = true;
+        selectMsfsAnimations([]);
     }
 
     function applyMsfsAnimation(entry) {
@@ -1086,30 +1131,86 @@ export default async () => {
     }
 
     const findMsfsAnimation = (index) => app.msfsAnimations.find((entry) => entry.index === index);
+    const selectedMsfsEntries = () => app.msfsAnimationSelected.map(findMsfsAnimation).filter((entry) => entry !== undefined);
 
-    uiModel.msfsAnimationFrame.subscribe(({ index, frame }) => {
-        const entry = findMsfsAnimation(index);
-        entry.frame = frame;
+    function refreshMsfsAnimationHighlight() {
+        const targets =
+            app.msfsAnimationHighlight && state.gltf !== undefined
+                ? getAnimatedTargets(state.gltf, selectedMsfsEntries())
+                : { nodes: new Set(), materials: new Set() };
+        highlights.animationNodes = targets.nodes;
+        highlights.animationMaterials = targets.materials;
+        refreshHighlights();
+    }
+
+    function selectMsfsAnimations(indices) {
+        app.msfsAnimationSelected = indices;
+        app.msfsAnimationPickInfo = "";
+        refreshMsfsAnimationHighlight();
+    }
+
+    function setMsfsFrame(entry, frame) {
+        entry.frame = Math.min(entry.maxFrame, Math.max(entry.minFrame, frame));
         entry.active = true;
         applyMsfsAnimation(entry);
-    });
+    }
 
-    uiModel.msfsAnimationPlayToggled.subscribe((index) => {
-        const entry = findMsfsAnimation(index);
-        entry.playing = !entry.playing;
-        entry.active = true;
-        if (entry.playing && entry.frame >= entry.maxFrame) {
-            entry.frame = entry.minFrame;
+    uiModel.msfsAnimationSelection.subscribe((indices) => selectMsfsAnimations(indices));
+
+    uiModel.msfsAnimationControl.subscribe((control) => {
+        const entries = selectedMsfsEntries();
+        switch (control.action) {
+            case "play": {
+                const pause = entries.some((entry) => entry.playing);
+                for (const entry of entries) {
+                    entry.playing = !pause;
+                    if (entry.playing) {
+                        entry.direction = 1;
+                        if (entry.frame >= entry.maxFrame) {
+                            entry.frame = entry.minFrame;
+                        }
+                    }
+                    setMsfsFrame(entry, entry.frame);
+                }
+                break;
+            }
+            case "step":
+                for (const entry of entries) {
+                    entry.playing = false;
+                    setMsfsFrame(entry, Math.round(entry.frame) + control.delta);
+                }
+                break;
+            case "start":
+            case "end":
+                for (const entry of entries) {
+                    entry.playing = false;
+                    setMsfsFrame(entry, control.action === "start" ? entry.minFrame : entry.maxFrame);
+                }
+                break;
+            case "frame":
+                for (const entry of entries) {
+                    setMsfsFrame(entry, control.frame);
+                }
+                break;
+            case "progress":
+                // Several animations of different lengths: the same fraction of each
+                for (const entry of entries) {
+                    setMsfsFrame(entry, Math.round(entry.minFrame + control.value * (entry.maxFrame - entry.minFrame)));
+                }
+                break;
+            case "highlight":
+                refreshMsfsAnimationHighlight();
+                break;
         }
-        applyMsfsAnimation(entry);
     });
 
-    // index undefined resets all animations
-    uiModel.msfsAnimationReset.subscribe((index) => {
+    // indices undefined resets all animations
+    uiModel.msfsAnimationReset.subscribe((indices) => {
         for (const entry of app.msfsAnimations) {
-            if (index === undefined || entry.index === index) {
+            if (indices === undefined || indices.includes(entry.index)) {
                 entry.playing = false;
                 entry.active = false;
+                entry.direction = 1;
                 entry.frame = entry.minFrame;
                 applyMsfsAnimation(entry);
             }
@@ -1126,14 +1227,28 @@ export default async () => {
             if (!entry.playing) {
                 continue;
             }
-            // Play once and hold the last frame, like a door or gear reaching its end position
-            let frame = entry.frame + deltaSeconds * app.msfsFrameRate;
-            if (frame >= entry.maxFrame) {
-                frame = entry.maxFrame;
+            const length = entry.maxFrame - entry.minFrame;
+            let frame = entry.frame + deltaSeconds * app.msfsFrameRate * entry.direction;
+            if (length <= 0) {
+                frame = entry.minFrame;
+                entry.playing = false;
+            } else if (app.msfsPlayMode === "loop") {
+                frame = entry.minFrame + ((((frame - entry.minFrame) % length) + length) % length);
+            } else if (app.msfsPlayMode === "pingpong") {
+                if (frame >= entry.maxFrame) {
+                    frame = entry.maxFrame - (frame - entry.maxFrame);
+                    entry.direction = -1;
+                } else if (frame <= entry.minFrame) {
+                    frame = entry.minFrame + (entry.minFrame - frame);
+                    entry.direction = 1;
+                }
+            } else if (frame >= entry.maxFrame || frame <= entry.minFrame) {
+                // Play once and hold the end frame, like a door or gear reaching its end position
+                frame = entry.direction > 0 ? entry.maxFrame : entry.minFrame;
                 entry.playing = false;
             }
-            entry.frame = frame;
-            state.animationTimeOverrides.set(entry.index, frame / app.msfsFrameRate);
+            entry.frame = Math.min(entry.maxFrame, Math.max(entry.minFrame, frame));
+            state.animationTimeOverrides.set(entry.index, entry.frame / app.msfsFrameRate);
             advanced = true;
         }
         return advanced;

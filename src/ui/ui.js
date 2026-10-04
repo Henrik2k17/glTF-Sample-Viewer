@@ -3,7 +3,8 @@ import { Subject } from "rxjs";
 import "./sass.scss";
 import Buefy from "@ntohq/buefy-next";
 
-// collapseActiveTab ids of the Inspector and Materials tabs (index.html)
+// collapseActiveTab ids of the Animations, Inspector and Materials tabs (index.html)
+const AnimationsTab = 3;
 const InspectorTab = 7;
 const MaterialsTab = 8;
 
@@ -63,12 +64,12 @@ const appCreated = createApp({
             msfsNightLightingChanged: new Subject(),
             showMsfsCollidersChanged: new Subject(),
             showMsfsLightsChanged: new Subject(),
-            msfsAnimationFrameChanged: new Subject(),
-            msfsAnimationPlayToggled: new Subject(),
+            msfsAnimationSelectionChanged: new Subject(),
+            msfsAnimationControl: new Subject(),
             msfsAnimationReset: new Subject(),
             inspectorSelectionChanged: new Subject(),
             inspectorFocus: new Subject(),
-            inspectorHighlightChanged: new Subject(),
+            highlightChanged: new Subject(),
             materialSelectionChanged: new Subject(),
             materialViewChanged: new Subject(),
             materialFactorChanged: new Subject(),
@@ -170,6 +171,14 @@ const appCreated = createApp({
             msfsAnimations: [],
             msfsFrameRate: 30,
             msfsAnimationFilter: "",
+            msfsAnimationActiveOnly: false,
+            // indices of the animations in the control dock; msfsAnimationAnchor for shift-click ranges
+            msfsAnimationSelected: [],
+            msfsAnimationAnchor: undefined,
+            msfsAnimationGroupsOpen: {},
+            msfsAnimationHighlight: true,
+            msfsPlayMode: "once",
+            msfsAnimationPickInfo: "",
             // Inspector tab: flat node tree (see logic/inspector.js) and the selected node's details
             inspectorNodes: [],
             inspectorExpanded: {},
@@ -177,9 +186,10 @@ const appCreated = createApp({
             inspectorSelected: undefined,
             inspectorDetails: [],
             inspectorMaterialSummary: [],
+            // Selection highlight (Display tab), used by the Inspector, Materials and Animations tabs.
             // sRGB hex from the colour picker; main.js converts it to linear for the renderer
-            inspectorHighlightColor: "#ffb33f",
-            inspectorHighlightStrength: 0.55,
+            highlightColor: "#ffb33f",
+            highlightStrength: 0.55,
             // Materials tab (logic/materials.js): list, selected material's textures and factors
             materialsList: [],
             materialsFilter: "",
@@ -410,14 +420,54 @@ const appCreated = createApp({
             }
             return rows;
         },
-        filteredMsfsAnimations() {
-            const filter = this.msfsAnimationFilter.trim().toLowerCase();
-            if (filter === "") {
-                return this.msfsAnimations;
+        animationsOpen() {
+            return this.activeTab === AnimationsTab && !this.tabContentHidden;
+        },
+        // [{name, count, open, entries}] by name prefix; filtering shows all matches expanded
+        msfsAnimationGroups() {
+            const filter = this.msfsAnimationFilter.trim().toLowerCase().replace(/_/g, " ");
+            const filtering = filter !== "" || this.msfsAnimationActiveOnly;
+            const groups = new Map();
+            for (const entry of this.msfsAnimations) {
+                let group = groups.get(entry.group);
+                if (group === undefined) {
+                    group = { name: entry.group, count: 0, entries: [] };
+                    groups.set(entry.group, group);
+                }
+                group.count++;
+                if ((filter === "" || entry.search.includes(filter)) && (!this.msfsAnimationActiveOnly || entry.active)) {
+                    group.entries.push(entry);
+                }
             }
-            return this.msfsAnimations.filter((animation) =>
-                animation.title.toLowerCase().includes(filter)
-            );
+            const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+            return [...groups.values()]
+                .filter((group) => !filtering || group.entries.length > 0)
+                .sort((a, b) => (a.name === "Other") - (b.name === "Other") || collator.compare(a.name, b.name))
+                .map((group) => ({
+                    ...group,
+                    open: filtering || groups.size === 1 || this.msfsAnimationGroupsOpen[group.name] === true,
+                    entries: group.entries.sort((a, b) => collator.compare(a.short, b.short))
+                }));
+        },
+        visibleMsfsAnimations() {
+            return this.msfsAnimationGroups.filter((group) => group.open).flatMap((group) => group.entries);
+        },
+        selectedMsfsAnimations() {
+            return this.msfsAnimationSelected
+                .map((index) => this.msfsAnimations.find((entry) => entry.index === index))
+                .filter((entry) => entry !== undefined);
+        },
+        // Dock slider position: frames for one animation, 0..1 progress for several
+        msfsDockProgress() {
+            const entries = this.selectedMsfsAnimations;
+            if (entries.length === 0) {
+                return 0;
+            }
+            const entry = entries[0];
+            return entry.maxFrame > entry.minFrame ? (entry.frame - entry.minFrame) / (entry.maxFrame - entry.minFrame) : 0;
+        },
+        msfsDockPlaying() {
+            return this.selectedMsfsAnimations.some((entry) => entry.playing);
         },
         hasInteractivityGraphs() {
             return this.graphs && this.graphs.length > 0;
@@ -630,6 +680,49 @@ const appCreated = createApp({
                 state[row.index] = expanded;
             }
             this.inspectorExpanded = state;
+        },
+        msfsAnimationProgress(entry) {
+            return entry.maxFrame > entry.minFrame ? ((entry.frame - entry.minFrame) / (entry.maxFrame - entry.minFrame)) * 100 : 0;
+        },
+        // Click: select one; Ctrl/Cmd-click: add or remove; Shift-click: range in the visible order
+        selectMsfsAnimation(index, event) {
+            let selected;
+            if (event?.shiftKey && this.msfsAnimationAnchor !== undefined) {
+                const order = this.visibleMsfsAnimations.map((entry) => entry.index);
+                const from = order.indexOf(this.msfsAnimationAnchor);
+                const to = order.indexOf(index);
+                if (from !== -1 && to !== -1) {
+                    selected = order.slice(Math.min(from, to), Math.max(from, to) + 1);
+                }
+            }
+            if (selected === undefined) {
+                if (event?.ctrlKey || event?.metaKey) {
+                    selected = this.msfsAnimationSelected.includes(index)
+                        ? this.msfsAnimationSelected.filter((i) => i !== index)
+                        : [...this.msfsAnimationSelected, index];
+                } else {
+                    selected = [index];
+                }
+                this.msfsAnimationAnchor = index;
+            }
+            this.msfsAnimationSelectionChanged.next(selected);
+        },
+        selectShownMsfsAnimations() {
+            this.msfsAnimationSelectionChanged.next(this.visibleMsfsAnimations.map((entry) => entry.index));
+        },
+        toggleMsfsAnimationGroup(name) {
+            this.msfsAnimationGroupsOpen[name] = !this.msfsAnimationGroupsOpen[name];
+        },
+        // After a viewport pick: open the groups of the selected animations and scroll to the first
+        revealMsfsAnimations(indices) {
+            for (const entry of this.msfsAnimations) {
+                if (indices.includes(entry.index)) {
+                    this.msfsAnimationGroupsOpen[entry.group] = true;
+                }
+            }
+            this.$nextTick(() => {
+                document.getElementById(`msfsAnimRow${indices[0]}`)?.scrollIntoView({ block: "nearest" });
+            });
         },
         // Switches to a sidebar tab by clicking its header, as the user would.
         showTab(id) {

@@ -288,6 +288,15 @@
                                         </option>
                                     </b-select>
                                 </b-field>
+                                <b-field label="Selection Highlight" class="subtitle"></b-field>
+                                <div class="highlightSettings" title="Tint of parts selected in the Inspector, Materials and Animations tabs">
+                                    <input type="color" title="Highlight colour" v-model="highlightColor"
+                                        v-on:input="highlightChanged.next({ color: $event.target.value, strength: highlightStrength })">
+                                    <input type="range" class="highlightStrength" min="0.1" max="1" step="0.05" title="Highlight strength"
+                                        v-model.number="highlightStrength"
+                                        v-on:input="highlightChanged.next({ color: highlightColor, strength: Number($event.target.value) })">
+                                    <span class="highlightValue">{{ Math.round(highlightStrength * 100) }}%</span>
+                                </div>
                                 <b-field label="Background" class="subtitle">
                                     <b-switch class="smallerLabel" v-model="renderEnv" v-on:input="renderEnvChanged.next($event.target.checked)" v-bind:disabled="ibl === false ? true : false">Environment
                                         Map</b-switch>
@@ -398,23 +407,96 @@
                                 <!-- MSFS models: animations are positioned by frame, like a sim variable drives them -->
                                 <template v-if="msfsAnimationMode">
                                     <label class="subtitle">MSFS Animations</label>
-                                    <p class="msfsAnimInfo">{{ msfsAnimations.length }} animations &middot; {{ msfsFrameRate }} fps &middot; untouched animations stay in their rest pose</p>
+                                    <p class="msfsAnimInfo">{{ msfsAnimations.length }} animations &middot; {{ msfsFrameRate }} fps &middot; untouched animations stay in their rest pose. Click a part in the view to find its animations, Ctrl/Shift-click to add more.</p>
+
+                                    <!-- Control dock for the selected animation(s) -->
+                                    <div class="msfsAnimDock">
+                                        <template v-if="selectedMsfsAnimations.length > 0">
+                                            <div class="msfsAnimDockTitle" v-if="selectedMsfsAnimations.length === 1">
+                                                <span class="msfsAnimDockGroup" v-if="selectedMsfsAnimations[0].group !== 'Other'">{{ selectedMsfsAnimations[0].group }} &rsaquo; </span>{{ selectedMsfsAnimations[0].short }}
+                                            </div>
+                                            <div class="msfsAnimDockTitle" v-else>
+                                                {{ selectedMsfsAnimations.length }} animations
+                                                <div class="msfsAnimDockNames">{{ selectedMsfsAnimations.map((entry) => entry.short).join(', ') }}</div>
+                                            </div>
+                                            <div class="msfsAnimDockControls">
+                                                <button class="button is-small msfsAnimBtn" title="To the first frame" v-on:click="msfsAnimationControl.next({ action: 'start' })">&#9198;</button>
+                                                <button class="button is-small msfsAnimBtn" title="One frame back" v-on:click="msfsAnimationControl.next({ action: 'step', delta: -1 })">&#9664;&#8203;|</button>
+                                                <button class="button is-small msfsAnimBtn msfsAnimPlayBtn" v-bind:title="msfsDockPlaying ? 'Pause' : 'Play'"
+                                                    v-on:click="msfsAnimationControl.next({ action: 'play' })">{{ msfsDockPlaying ? '&#10074;&#10074;' : '&#9654;' }}</button>
+                                                <button class="button is-small msfsAnimBtn" title="One frame forward" v-on:click="msfsAnimationControl.next({ action: 'step', delta: 1 })">|&#8203;&#9654;</button>
+                                                <button class="button is-small msfsAnimBtn" title="To the last frame" v-on:click="msfsAnimationControl.next({ action: 'end' })">&#9197;</button>
+                                                <span class="msfsAnimDockFrame" v-if="selectedMsfsAnimations.length === 1">
+                                                    <input type="number" class="msfsAnimFrameInput" step="1"
+                                                        v-bind:min="selectedMsfsAnimations[0].minFrame" v-bind:max="selectedMsfsAnimations[0].maxFrame"
+                                                        v-bind:value="Math.round(selectedMsfsAnimations[0].frame)"
+                                                        v-on:change="msfsAnimationControl.next({ action: 'frame', frame: Number($event.target.value) })">
+                                                    / {{ selectedMsfsAnimations[0].maxFrame }}
+                                                </span>
+                                                <span class="msfsAnimDockFrame" v-else>{{ Math.round(msfsDockProgress * 100) }}%</span>
+                                                <button class="button is-small msfsAnimBtn msfsAnimResetBtn" title="Back to rest pose"
+                                                    v-on:click="msfsAnimationReset.next(msfsAnimationSelected)">&#8634;</button>
+                                            </div>
+                                            <input v-if="selectedMsfsAnimations.length === 1" type="range" class="msfsAnimSlider"
+                                                v-bind:min="selectedMsfsAnimations[0].minFrame" v-bind:max="selectedMsfsAnimations[0].maxFrame" step="1"
+                                                v-bind:value="selectedMsfsAnimations[0].frame"
+                                                v-on:input="msfsAnimationControl.next({ action: 'frame', frame: Number($event.target.value) })">
+                                            <input v-else type="range" class="msfsAnimSlider" min="0" max="1" step="0.001"
+                                                v-bind:value="msfsDockProgress"
+                                                v-on:input="msfsAnimationControl.next({ action: 'progress', value: Number($event.target.value) })">
+                                            <div class="msfsAnimDockOptions">
+                                                <div class="select is-small">
+                                                    <select v-model="msfsPlayMode" title="What happens at the last frame">
+                                                        <option value="once">Play once</option>
+                                                        <option value="loop">Loop</option>
+                                                        <option value="pingpong">Ping-pong</option>
+                                                    </select>
+                                                </div>
+                                                <label class="checkbox" title="Tint the parts the selected animations move">
+                                                    <input type="checkbox" v-model="msfsAnimationHighlight"
+                                                        v-on:change="msfsAnimationControl.next({ action: 'highlight' })"> Highlight parts
+                                                </label>
+                                                <a class="msfsAnimClear" v-on:click="msfsAnimationSelectionChanged.next([])">Clear</a>
+                                            </div>
+                                        </template>
+                                        <p v-else class="msfsAnimDockHint">
+                                            {{ msfsAnimationPickInfo || 'Select an animation below (Ctrl/Shift-click for several), or click a part in the view.' }}
+                                        </p>
+                                    </div>
+
                                     <div class="msfsAnimToolbar">
                                         <input class="input is-small" type="search" placeholder="Filter by name" v-model="msfsAnimationFilter">
+                                        <label class="checkbox msfsAnimActiveOnly" title="Only animations that are not in their rest pose">
+                                            <input type="checkbox" v-model="msfsAnimationActiveOnly"> Active
+                                        </label>
+                                    </div>
+                                    <div class="msfsAnimToolbar msfsAnimToolbarButtons">
+                                        <button class="button is-small is-rounded is-outlined" title="Select all animations shown in the list"
+                                            v-bind:disabled="visibleMsfsAnimations.length === 0" v-on:click="selectShownMsfsAnimations()">Select shown</button>
                                         <button class="button is-small is-rounded is-outlined" v-on:click="msfsAnimationReset.next(undefined)">Reset all</button>
                                     </div>
-                                    <div v-for="animation in filteredMsfsAnimations" v-bind:key="animation.index" class="msfsAnimRow" v-bind:class="{ msfsAnimActive: animation.active }">
-                                        <div class="msfsAnimHeader">
-                                            <button class="button is-small msfsAnimPlay" v-bind:title="animation.playing ? 'Pause' : 'Play to the last frame'"
-                                                v-on:click="msfsAnimationPlayToggled.next(animation.index)">{{ animation.playing ? '&#10074;&#10074;' : '&#9654;' }}</button>
-                                            <span class="msfsAnimName" v-bind:title="animation.title">{{ animation.title }}</span>
-                                            <span class="msfsAnimFrame">{{ Math.round(animation.frame) }}&thinsp;/&thinsp;{{ animation.maxFrame }}</span>
-                                            <button class="button is-small msfsAnimResetBtn" title="Back to rest pose" v-bind:disabled="!animation.active"
-                                                v-on:click="msfsAnimationReset.next(animation.index)">&#8634;</button>
-                                        </div>
-                                        <input type="range" class="msfsAnimSlider" v-bind:min="animation.minFrame" v-bind:max="animation.maxFrame" step="1"
-                                            v-bind:value="animation.frame"
-                                            v-on:input="msfsAnimationFrameChanged.next({ index: animation.index, frame: Number($event.target.value) })">
+
+                                    <div class="msfsAnimList">
+                                        <template v-for="group in msfsAnimationGroups" v-bind:key="group.name">
+                                            <div class="msfsAnimGroup" v-if="msfsAnimationGroups.length > 1" v-on:click="toggleMsfsAnimationGroup(group.name)">
+                                                <span class="msfsAnimGroupToggle">{{ group.open ? '&#9662;' : '&#9656;' }}</span>
+                                                <span class="msfsAnimGroupName">{{ group.name }}</span>
+                                                <span class="msfsAnimGroupCount">{{ group.entries.length === group.count ? group.count : group.entries.length + ' / ' + group.count }}</span>
+                                            </div>
+                                            <template v-if="group.open">
+                                                <div v-for="entry in group.entries" v-bind:key="entry.index" v-bind:id="'msfsAnimRow' + entry.index"
+                                                    class="msfsAnimRow" v-bind:title="entry.title"
+                                                    v-bind:class="{ msfsAnimRowSelected: msfsAnimationSelected.includes(entry.index), msfsAnimRowActive: entry.active }"
+                                                    v-on:click="selectMsfsAnimation(entry.index, $event)">
+                                                    <span class="msfsAnimRowName">{{ entry.short }}</span>
+                                                    <span class="msfsAnimRowPlaying" v-if="entry.playing">&#9654;</span>
+                                                    <span class="msfsAnimRowBar" v-bind:title="Math.round(entry.frame) + ' / ' + entry.maxFrame">
+                                                        <span v-bind:style="{ width: msfsAnimationProgress(entry) + '%' }"></span>
+                                                    </span>
+                                                </div>
+                                            </template>
+                                        </template>
+                                        <p v-if="msfsAnimationGroups.length === 0" class="msfsAnimInfo">No matching animations.</p>
                                     </div>
                                 </template>
                                 <template v-if="!msfsAnimationMode">
@@ -632,16 +714,6 @@
                                     </table>
                                     <p class="inspectorInfo">"as Max" follows the 3ds Max viewport shaders; "sim only" effects are not rendered here.</p>
                                 </details>
-                                <div class="inspectorHighlightSettings">
-                                    <label for="inspectorHighlightColor">Highlight</label>
-                                    <input id="inspectorHighlightColor" type="color" title="Highlight colour"
-                                        v-model="inspectorHighlightColor"
-                                        v-on:input="inspectorHighlightChanged.next({ color: $event.target.value, strength: inspectorHighlightStrength })">
-                                    <input type="range" class="inspectorHighlightStrength" min="0.1" max="1" step="0.05" title="Highlight strength"
-                                        v-model.number="inspectorHighlightStrength"
-                                        v-on:input="inspectorHighlightChanged.next({ color: inspectorHighlightColor, strength: Number($event.target.value) })">
-                                    <span class="inspectorHighlightValue">{{ Math.round(inspectorHighlightStrength * 100) }}%</span>
-                                </div>
                                 <div class="inspectorTree">
                                     <div v-for="row in visibleInspectorRows" v-bind:key="row.index" v-bind:id="'inspectorRow' + row.index"
                                         class="inspectorRow" v-bind:class="{ inspectorRowSelected: row.index === inspectorSelected }"
@@ -720,7 +792,7 @@
                                         <button class="button is-small is-rounded is-outlined" v-on:click="materialSelectionChanged.next(undefined)">Clear</button>
                                     </div>
                                     <div class="materialViewOptions">
-                                        <label class="checkbox" title="Tint the parts using this material (colour as set in the Inspector)">
+                                        <label class="checkbox" title="Tint the parts using this material (colour as set in the Display tab)">
                                             <input type="checkbox" v-model="materialHighlight"
                                                 v-on:change="materialViewChanged.next({ highlight: materialHighlight, isolate: materialIsolate })">
                                             Highlight
