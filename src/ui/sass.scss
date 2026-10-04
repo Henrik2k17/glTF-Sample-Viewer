@@ -758,3 +758,30 @@ input:invalid {
     border-color: #87c540;
     color: #1e1e1e;
 }
+
+.inspectorSummary {
+    margin: 0.5em 0 0.75em 0;
+    font-size: 13px;
+}
+.inspectorSummary summary {
+    cursor: pointer;
+    opacity: 0.85;
+}
+.inspectorStatus {
+    font-size: 10px;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: #3d3d3d;
+}
+.inspectorStatus-asmax {
+    background: #2d4a1c;
+    color: #c3e88d;
+}
+.inspectorStatus-approx {
+    background: #5c4b14;
+    color: #ffe08a;
+}
+.inspectorStatus-simonly {
+    background: #4a2a2a;
+    color: #ffb3b3;
+}

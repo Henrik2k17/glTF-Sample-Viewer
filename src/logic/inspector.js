@@ -7,6 +7,73 @@ const MsfsMeshObjectExtensions = {
     ASOBO_fade_object: "fade_objects"
 };
 
+// How the viewer handles each MSFS material extension:
+// "as Max" follows Asobo's 3ds Max viewport shaders, "approx." approximates the sim,
+// "sim only" is not rendered (nothing defines how the sim draws it), "no effect" has nothing
+// to show in a viewer.
+const MsfsMaterialSupport = {
+    ASOBO_material_UV_options: ["as Max", "tiling, offset, rotation; clamp as clamp-to-edge"],
+    ASOBO_material_detail_map: ["as Max", "color, normal, blend mask; metal/rough/AO map unused (as in Max)"],
+    ASOBO_occlusion_strength: ["as Max", ""],
+    ASOBO_extra_occlusion: ["as Max", ""],
+    ASOBO_material_pearlescent: ["as Max", ""],
+    ASOBO_material_dirt: ["as Max", "roughness/metal read from G/B, not alpha"],
+    ASOBO_material_tire: ["as Max", "mud cutout and mud normal unused (as in Max)"],
+    ASOBO_material_parallax_window: ["as Max", ""],
+    ASOBO_material_emissive: ["as Max", "day/night multiplier (Display tab: night lighting)"],
+    ASOBO_material_invisible: ["as Max", "hidden unless shown in the Display tab"],
+    ASOBO_material_draw_order: ["approx.", "depth bias and sort order"],
+    ASOBO_material_geometry_decal: ["approx.", "color and normal blend factors; metal/rough/AO factors and modes ignored"],
+    ASOBO_material_clear_coat_v2: ["approx.", "as KHR clearcoat; coat color not supported"],
+    ASOBO_material_iridescent: ["approx.", "as KHR iridescence"],
+    ASOBO_material_alphamode_dither: ["approx.", "alpha blended instead of dithered"],
+    ASOBO_material_windshield_v3: ["sim only", "wipers, rain, scratches"],
+    ASOBO_material_glass_v2: ["sim only", "glass thickness"],
+    ASOBO_material_rain_options: ["sim only", "rain drops"],
+    ASOBO_material_SSS: ["sim only", "subsurface scattering"],
+    ASOBO_material_anisotropic_v2: ["sim only", "anisotropic reflections"],
+    ASOBO_material_fresnel_fade: ["sim only", ""],
+    ASOBO_material_ghost_effect: ["sim only", ""],
+    ASOBO_material_sail: ["sim only", "light absorption"],
+    ASOBO_material_vegetation: ["sim only", ""],
+    ASOBO_material_foliage_mask: ["sim only", ""],
+    ASOBO_material_fake_terrain: ["sim only", ""],
+    ASOBO_material_environment_occluder: ["sim only", ""],
+    ASOBO_material_day_night_switch: ["sim only", ""],
+    ASOBO_material_shadow_options: ["no effect", "the viewer casts no shadows"],
+    ASOBO_material_antialiasing_options: ["no effect", ""],
+    ASOBO_material_disable_motion_blur: ["no effect", ""],
+    ASOBO_material_flip_back_face: ["no effect", "back faces are lit with flipped normals anyway"],
+    ASOBO_tags: ["no effect", "metadata"]
+};
+
+function getMsfsSupport(extensionName) {
+    return MsfsMaterialSupport[extensionName] ?? ["unknown", ""];
+}
+
+/**
+ * Model-wide overview of the MSFS material extensions: how many materials use each and how
+ * the viewer handles it, least supported first.
+ * @returns {{name: string, count: number, status: string, note: string}[]}
+ */
+function getMsfsMaterialSummary(gltf) {
+    const counts = new Map();
+    for (const material of gltf?.materials ?? []) {
+        for (const name of Object.keys(material.extensions ?? {})) {
+            if (name.startsWith("ASOBO_")) {
+                counts.set(name, (counts.get(name) ?? 0) + 1);
+            }
+        }
+    }
+    const order = ["sim only", "unknown", "approx.", "as Max", "no effect"];
+    return [...counts.entries()]
+        .map(([name, count]) => {
+            const [status, note] = getMsfsSupport(name);
+            return { name, count, status, note };
+        })
+        .sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || b.count - a.count);
+}
+
 const PrimitiveModes = ["POINTS", "LINES", "LINE_LOOP", "LINE_STRIP", "TRIANGLES", "TRIANGLE_STRIP", "TRIANGLE_FAN"];
 
 // Only extensions still in their JSON form are shown verbatim; ones the renderer parsed into
@@ -215,6 +282,14 @@ function materialSections(gltf, materialIndex) {
     if (tags?.length) {
         rows.push(["Tags", tags.join(", ")]);
     }
+    const materialCode = material.extras?.ASOBO_material_code;
+    if (materialCode !== undefined) {
+        rows.push(["MSFS type", String(materialCode)]);
+    }
+    for (const name of Object.keys(material.extensions ?? {}).filter((key) => key.startsWith("ASOBO_"))) {
+        const [status, note] = getMsfsSupport(name);
+        rows.push([name.replace(/^ASOBO_(material_)?/, ""), note === "" ? status : `${status}: ${note}`]);
+    }
     const asobo = Object.fromEntries(
         Object.entries(material.extensions ?? {}).filter(([name]) => name.startsWith("ASOBO_"))
     );
@@ -349,4 +424,4 @@ function getNodeDetails(gltf, nodeIndex) {
     return sections;
 }
 
-export { buildNodeTree, collectSubtree, getNodeDetails };
+export { buildNodeTree, collectSubtree, getMsfsMaterialSummary, getNodeDetails };

@@ -1,7 +1,7 @@
 import { GltfView, ResourceLoaderUtils, Msfs } from "@khronosgroup/gltf-viewer";
 
 import { UIModel } from "./logic/uimodel.js";
-import { buildNodeTree, collectSubtree, getNodeDetails } from "./logic/inspector.js";
+import { buildNodeTree, collectSubtree, getMsfsMaterialSummary, getNodeDetails } from "./logic/inspector.js";
 import { TextureFolders } from "./logic/texture_folders.js";
 import { app } from "./ui/ui.js";
 import { EMPTY, from, merge } from "rxjs";
@@ -761,6 +761,7 @@ export default async () => {
     // open, clicking the model selects the part under the cursor; clicking empty space clears it.
     function setupInspector(gltf, sceneIndex) {
         app.inspectorNodes = buildNodeTree(gltf, sceneIndex);
+        app.inspectorMaterialSummary = getMsfsMaterialSummary(gltf);
         app.inspectorFilter = "";
         const expanded = {};
         for (const row of app.inspectorNodes) {

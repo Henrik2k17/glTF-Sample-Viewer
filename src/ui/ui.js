@@ -164,6 +164,7 @@ const appCreated = createApp({
             inspectorFilter: "",
             inspectorSelected: undefined,
             inspectorDetails: [],
+            inspectorMaterialSummary: [],
             // sRGB hex from the colour picker; main.js converts it to linear for the renderer
             inspectorHighlightColor: "#ffb33f",
             inspectorHighlightStrength: 0.55,
@@ -564,6 +565,9 @@ const appCreated = createApp({
                 default:
                     return `error: ${folder.error}`;
             }
+        },
+        msfsSummaryCount(status) {
+            return this.inspectorMaterialSummary.filter((row) => row.status === status).length;
         },
         toggleInspectorNode(index) {
             this.inspectorExpanded[index] = !this.inspectorExpanded[index];

@@ -622,6 +622,16 @@
                                     <button class="button is-small is-rounded is-outlined" title="Expand all" v-on:click="setInspectorExpandedAll(true)">+</button>
                                     <button class="button is-small is-rounded is-outlined" title="Collapse all" v-on:click="setInspectorExpandedAll(false)">&minus;</button>
                                 </div>
+                                <details class="inspectorSummary" v-if="inspectorMaterialSummary.length > 0">
+                                    <summary>MSFS material extensions: {{ msfsSummaryCount('sim only') }} not rendered, {{ msfsSummaryCount('approx.') }} approximated</summary>
+                                    <table class="inspectorTable">
+                                        <tr v-for="row in inspectorMaterialSummary" v-bind:key="row.name" v-bind:title="row.note">
+                                            <th>{{ row.name.replace(/^ASOBO_(material_)?/, "") }}</th>
+                                            <td><span class="inspectorStatus" v-bind:class="'inspectorStatus-' + row.status.replace(/[^a-z]/g, '')">{{ row.status }}</span> &times;{{ row.count }}</td>
+                                        </tr>
+                                    </table>
+                                    <p class="inspectorInfo">"as Max" follows the 3ds Max viewport shaders; "sim only" effects are not rendered here.</p>
+                                </details>
                                 <div class="inspectorHighlightSettings">
                                     <label for="inspectorHighlightColor">Highlight</label>
                                     <input id="inspectorHighlightColor" type="color" title="Highlight colour"
