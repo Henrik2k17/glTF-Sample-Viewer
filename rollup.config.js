@@ -50,7 +50,7 @@ function copyFile(from, to, file, overwrite = false) {
 // can be turned off for fast dev iteration via `SOURCEMAP=false npm run dev:fast`.
 const sourcemap = process.env.SOURCEMAP !== "false";
 
-export default {
+const app = {
     strictDeprecations: true,
     input: "src/main.js",
     output: [
@@ -96,3 +96,27 @@ export default {
         })
     ]
 };
+
+// The glTF Validator runs in its own worker bundle (see src/validator.worker.js).
+const validatorWorker = {
+    strictDeprecations: true,
+    input: "src/validator.worker.js",
+    output: {
+        file: "dist/validator.worker.js",
+        format: "iife",
+        sourcemap
+    },
+    plugins: [
+        resolve({ browser: true, preferBuiltins: false }),
+        commonjs(),
+        license({
+            banner: {
+                content: {
+                    file: "LICENSE_BANNER.txt"
+                }
+            }
+        })
+    ]
+};
+
+export default [app, validatorWorker];

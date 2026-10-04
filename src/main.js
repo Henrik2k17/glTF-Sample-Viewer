@@ -1,14 +1,12 @@
-import { GltfView, ResourceLoaderUtils, Msfs } from "@khronosgroup/gltf-viewer";
+import { GltfView, Msfs } from "@khronosgroup/gltf-viewer";
 
 import { UIModel } from "./logic/uimodel.js";
 import { buildNodeTree, collectSubtree, getMsfsMaterialSummary, getNodeDetails } from "./logic/inspector.js";
 import { TextureFolders } from "./logic/texture_folders.js";
 import { app } from "./ui/ui.js";
-import { EMPTY, from, merge } from "rxjs";
-import { mergeMap, map, share, catchError } from "rxjs/operators";
+import { EMPTY, Observable, from, merge } from "rxjs";
+import { mergeMap, map, share, catchError, switchMap } from "rxjs/operators";
 import { GltfModelPathProvider, fillEnvironmentWithPaths } from "./model_path_provider.js";
-
-import { validateBytes } from "gltf-validator";
 
 export default async () => {
     const canvas = document.getElementById("canvas");
@@ -78,81 +76,40 @@ export default async () => {
 
     const uiModel = new UIModel(app, pathProvider, environmentPaths);
 
+    // The validator reads the whole asset again, so it runs in a worker to keep the main
+    // thread free for loading and rendering.
+    let validatorWorker = undefined;
     const validation = uiModel.model.pipe(
-        mergeMap((model) => {
-            const func = async (model) => {
-                try {
-                    const fileType = typeof model.mainFile;
-                    // TODO: Remove ignoredIssues once validator is updated to support KHR_gaussian_splatting extension
-                    const validateOptions = {
-                        ignoredIssues: ["MESH_PRIMITIVE_INVALID_ATTRIBUTE"]
-                    };
-                    if (fileType == "string") {
-                        const externalRefFunction = (uri) => {
-                            const parent = model.mainFile.substring(
-                                0,
-                                model.mainFile.lastIndexOf("/") + 1
-                            );
-                            return new Promise((resolve, reject) => {
-                                fetch(parent + uri)
-                                    .then((response) => {
-                                        response
-                                            .arrayBuffer()
-                                            .then((buffer) => {
-                                                resolve(new Uint8Array(buffer));
-                                            })
-                                            .catch((error) => {
-                                                reject(error);
-                                            });
-                                    })
-                                    .catch((error) => {
-                                        reject(error);
-                                    });
-                            });
-                        };
-                        const response = await fetch(model.mainFile);
-                        const buffer = await response.arrayBuffer();
-                        validateOptions.uri = model.mainFile;
-                        validateOptions.externalResourceFunction = externalRefFunction;
-                        return await validateBytes(new Uint8Array(buffer), validateOptions);
-                    } else if (Array.isArray(model.mainFile)) {
-                        const externalRefFunction = (uri) => {
-                            return new Promise((resolve, reject) => {
-                                const foundFile = ResourceLoaderUtils.findFile(
-                                    model.additionalFiles,
-                                    uri,
-                                    model.mainFile[0]
-                                )?.[1];
-                                if (foundFile) {
-                                    foundFile
-                                        .arrayBuffer()
-                                        .then((buffer) => {
-                                            resolve(new Uint8Array(buffer));
-                                        })
-                                        .catch((error) => {
-                                            reject(error);
-                                        });
-                                } else {
-                                    reject("File not found");
-                                }
-                            });
-                        };
-
-                        const buffer = await model.mainFile[1].arrayBuffer();
-                        validateOptions.uri = model.mainFile[0];
-                        validateOptions.externalResourceFunction = externalRefFunction;
-                        return await validateBytes(new Uint8Array(buffer), validateOptions);
+        switchMap((model) => {
+            validatorWorker?.terminate();
+            const worker = new Worker("./validator.worker.js");
+            validatorWorker = worker;
+            return new Observable((subscriber) => {
+                const finish = (report) => {
+                    subscriber.next(report);
+                    subscriber.complete();
+                    worker.terminate();
+                };
+                worker.onmessage = (event) => {
+                    if (event.data?.error !== undefined) {
+                        console.error(event.data.error);
                     }
-                } catch (error) {
-                    console.error(error);
-                }
-            };
-            return from(func(model)).pipe(
-                catchError((error) => {
-                    console.error(`Validation failed: ${error}`);
-                    return { error: `Validation failed: ${error}` };
-                })
-            );
+                    finish(event.data);
+                };
+                worker.onerror = (event) => {
+                    console.error(`Validation failed: ${event.message}`);
+                    finish({ error: `Validation failed: ${event.message}` });
+                };
+                worker.postMessage({
+                    mainFile: model.mainFile,
+                    additionalFiles: model.additionalFiles,
+                    options: {
+                        // TODO: Remove ignoredIssues once validator is updated to support KHR_gaussian_splatting extension
+                        ignoredIssues: ["MESH_PRIMITIVE_INVALID_ATTRIBUTE"]
+                    }
+                });
+                return () => worker.terminate();
+            });
         })
     );
 
