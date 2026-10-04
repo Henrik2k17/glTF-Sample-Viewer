@@ -16,9 +16,40 @@ function parseValue(message) {
  * How one message is reported: {key, label, note, harmless}. Messages with the same key are
  * one group in the list.
  */
-function classify(message) {
+function classify(message, compiled, gltf) {
     const code = message.code;
     const pointer = message.pointer ?? "";
+    if (compiled) {
+        // Compiled by the MSFS 2024 package builder (ASOBO_asset_optimized), see msfs_compiled.js
+        switch (code) {
+            case "MESH_PRIMITIVE_ATTRIBUTES_ACCESSOR_INVALID_FORMAT":
+                return {
+                    key: "compiled:vertex-format",
+                    label: "Compiled vertex formats",
+                    note: "Packed normals and tangents, 16 bit float UVs and colors of the MSFS compiler; the viewer decodes them.",
+                    harmless: true
+                };
+            case "IMAGE_UNRECOGNIZED_FORMAT": {
+                const image = gltf?.images[Number(/^\/images\/(\d+)/.exec(pointer)?.[1])];
+                if (/\.ktx2$/i.test(image?.uri ?? "")) {
+                    return {
+                        key: "compiled:ktx2",
+                        label: "Compiled KTX2 textures",
+                        note: "Block-compressed (BC1/BC5/BC7) KTX2 from the MSFS compiler; the validator only reads Basis KTX2. The viewer uploads them directly.",
+                        harmless: true
+                    };
+                }
+                break;
+            }
+            case "NON_OBJECT_EXTRAS":
+                return {
+                    key: "compiled:extras",
+                    label: "Text extras",
+                    note: "The MSFS compiler marks converted images with a text extras value.",
+                    harmless: true
+                };
+        }
+    }
     switch (code) {
         case "ACCESSOR_NON_CLAMPED": {
             const value = parseValue(message.message);
@@ -75,10 +106,24 @@ function classify(message) {
                 };
             }
             break;
+        case "UNUSED_MESH_TANGENT":
+            return { key: code, label: "Tangents without normal map", note: "Unused, but harmless.", harmless: true };
         case "BUFFER_VIEW_TARGET_MISSING":
             return { key: code, label: "Buffer view target not set", note: "Only a hint for loaders.", harmless: true };
-        case "IO_ERROR":
+        case "IO_ERROR": {
+            // The viewer finds MSFS textures by file name in the model's texture folder and the
+            // fallback folders of its texture.cfg, as the sim does; the validator only tries the URI.
+            const imageIndex = /^[/]images[/](\d+)/.exec(pointer)?.[1];
+            if (imageIndex !== undefined && gltf?.images[Number(imageIndex)]?.isLoaded?.() === true) {
+                return {
+                    key: "IO_ERROR:resolved",
+                    label: "Textures found elsewhere",
+                    note: "Not at the path in the file, but found by file name in the model's texture folder or a texture.cfg fallback folder, as in the sim.",
+                    harmless: true
+                };
+            }
             return { key: code, label: "Files that could not be loaded", note: "Missing or unreadable files, e.g. textures.", harmless: false };
+        }
     }
     return {
         key: code,
@@ -156,9 +201,10 @@ function summarizeValidation(report, gltf) {
         }
     });
 
+    const compiled = gltf?.asset?.extensions?.ASOBO_asset_optimized !== undefined;
     const groups = new Map();
     for (const message of messages) {
-        const info = classify(message);
+        const info = classify(message, compiled, gltf);
         let group = groups.get(info.key);
         if (group === undefined) {
             group = { ...info, code: message.code, severity: message.severity, count: 0, pointers: new Map() };

@@ -137,7 +137,9 @@ function getMaterialTextureSlots(gltf, materialIndex) {
             `#${info.index}${imageIndex !== undefined ? `, image #${imageIndex}` : ""}`
         ]);
         if (image?.mimeType) {
-            rows.push(["Format", image.mimeType.replace(/^image\//, "")]);
+            const compressed = image.image?.compressed?.format;
+            const format = image.mimeType.replace(/^image\//, "");
+            rows.push(["Format", compressed ? `${format} · ${compressed.replace("_", " ")}` : format]);
         }
         rows.push(["UV set", String(info.texCoord ?? 0)]);
         const transform = describeTransform(info.extensions?.KHR_texture_transform);
