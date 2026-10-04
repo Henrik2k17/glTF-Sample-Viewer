@@ -564,6 +564,76 @@
                             </div>
                         </b-tab-item>
 
+                        <!-- Inspector tab: node tree, selected node's details and MSFS data -->
+                        <b-tab-item label="Inspector" icon="video" class="tabItemScrollable tab-item" v-if="inspectorNodes.length > 0" :order="3.5">
+                            <template #header>
+                                <div @click="collapseActiveTab($event, 7)"
+                                    v-bind:style="[tabContentHidden === false && activeTab === 7 ? {'height': '100%'} : {}]">
+                                    <img v-bind:src="[tabContentHidden === false && activeTab === 7 ? 'assets/ui/Inspector 50X50.svg' : 'assets/ui/Inspector 30X30.svg']"
+                                        v-bind:width="[tabContentHidden === false && activeTab === 7 ? '50px' : '30px']"
+                                        v-bind:style="[tabContentHidden === false && activeTab === 7 ? {'height': '100%'} : {}]">
+                                    <span
+                                        v-show='isMobile === false && (tabContentHidden === true || activeTab !== 7)'>
+                                        Inspector
+                                    </span>
+                                </div>
+                            </template>
+
+                            <div class="tabContent">
+                                <img src="assets/ui/Navigation_right_20px.svg" class="tabNavigationIcon" width="30px"
+                                    @click="collapseActiveTab($event, 7)">
+                                <h2 class="title is-spaced" style="margin-bottom: 0.5em;">Inspector</h2>
+                                <p class="inspectorInfo">{{ inspectorNodes.length }} nodes &middot; click a part in the view to select it, double-click a row to focus</p>
+                                <div class="inspectorToolbar">
+                                    <input class="input is-small" type="search" placeholder="Filter by name, id or tag" v-model="inspectorFilter">
+                                    <button class="button is-small is-rounded is-outlined" title="Expand all" v-on:click="setInspectorExpandedAll(true)">+</button>
+                                    <button class="button is-small is-rounded is-outlined" title="Collapse all" v-on:click="setInspectorExpandedAll(false)">&minus;</button>
+                                </div>
+                                <div class="inspectorHighlightSettings">
+                                    <label for="inspectorHighlightColor">Highlight</label>
+                                    <input id="inspectorHighlightColor" type="color" title="Highlight colour"
+                                        v-model="inspectorHighlightColor"
+                                        v-on:input="inspectorHighlightChanged.next({ color: $event.target.value, strength: inspectorHighlightStrength })">
+                                    <input type="range" class="inspectorHighlightStrength" min="0.1" max="1" step="0.05" title="Highlight strength"
+                                        v-model.number="inspectorHighlightStrength"
+                                        v-on:input="inspectorHighlightChanged.next({ color: inspectorHighlightColor, strength: Number($event.target.value) })">
+                                    <span class="inspectorHighlightValue">{{ Math.round(inspectorHighlightStrength * 100) }}%</span>
+                                </div>
+                                <div class="inspectorTree">
+                                    <div v-for="row in visibleInspectorRows" v-bind:key="row.index" v-bind:id="'inspectorRow' + row.index"
+                                        class="inspectorRow" v-bind:class="{ inspectorRowSelected: row.index === inspectorSelected }"
+                                        v-bind:style="{ paddingLeft: (row.depth * 12 + 4) + 'px' }"
+                                        v-bind:title="row.uniqueId ? row.name + ' (' + row.uniqueId + ')' : row.name"
+                                        v-on:click="inspectorSelectionChanged.next(row.index)"
+                                        v-on:dblclick="inspectorFocus.next(row.index)">
+                                        <span class="inspectorToggle" v-on:click.stop="toggleInspectorNode(row.index)" v-on:dblclick.stop>
+                                            {{ row.childCount === 0 ? '' : (inspectorFilter.trim() !== '' || inspectorExpanded[row.index] ? '&#9662;' : '&#9656;') }}
+                                        </span>
+                                        <span class="inspectorName">{{ row.name }}</span>
+                                        <span v-for="badge in row.badges" v-bind:key="badge" class="inspectorBadge" v-bind:class="'inspectorBadge-' + badge">{{ badge }}</span>
+                                        <span v-for="tag in row.tags" v-bind:key="'tag' + tag" class="inspectorBadge inspectorBadge-tag">{{ tag }}</span>
+                                    </div>
+                                </div>
+                                <template v-if="inspectorSelectedRow">
+                                    <div class="inspectorDetailsHeader">
+                                        <span class="inspectorDetailsName" v-bind:title="inspectorSelectedRow.name">{{ inspectorSelectedRow.name }}</span>
+                                        <button class="button is-small is-rounded is-outlined" v-on:click="inspectorFocus.next(inspectorSelected)">Focus</button>
+                                        <button class="button is-small is-rounded is-outlined" v-on:click="inspectorSelectionChanged.next(undefined)">Clear</button>
+                                    </div>
+                                    <div v-for="(section, sectionIndex) in inspectorDetails" v-bind:key="sectionIndex" class="inspectorSection">
+                                        <div class="inspectorSectionTitle">{{ section.title }}</div>
+                                        <table v-if="section.rows" class="inspectorTable">
+                                            <tr v-for="(row, rowIndex) in section.rows" v-bind:key="rowIndex">
+                                                <th>{{ row[0] }}</th>
+                                                <td>{{ row[1] }}</td>
+                                            </tr>
+                                        </table>
+                                        <pre v-if="section.json" class="inspectorJson">{{ section.json }}</pre>
+                                    </div>
+                                </template>
+                            </div>
+                        </b-tab-item>
+
                         <!-- Physics tab -->
                         <b-tab-item label="Physics" icon="video" class="tabItemScrollable tab-item" v-if="hasPhysics" :order="4">
                             <template #header>

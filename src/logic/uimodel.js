@@ -73,6 +73,9 @@ class UIModel {
         this.msfsAnimationFrame = app.msfsAnimationFrameChanged.pipe();
         this.msfsAnimationPlayToggled = app.msfsAnimationPlayToggled.pipe();
         this.msfsAnimationReset = app.msfsAnimationReset.pipe();
+        this.inspectorSelection = app.inspectorSelectionChanged.pipe();
+        this.inspectorFocus = app.inspectorFocus.pipe();
+        this.inspectorHighlight = app.inspectorHighlightChanged.pipe();
         this.iblEnabled = app.iblChanged.pipe();
         this.iblIntensity = app.iblIntensityChanged.pipe();
         this.punctualLightsEnabled = app.punctualLightsChanged.pipe();
@@ -482,8 +485,17 @@ const getInputObservables = (inputElement, app) => {
     inputElement.addEventListener("click", (event) => event.preventDefault());
     inputElement.addEventListener("mouseout", (event) => event.preventDefault());
 
+    // A click that ends an orbit or pan drag is not a selection.
+    let mouseDownPosition = { x: 0, y: 0 };
+    inputElement.addEventListener("mousedown", (event) => {
+        mouseDownPosition = { x: event.pageX, y: event.pageY };
+    });
     const selection = click.pipe(
         filter((event) => event.button === 0),
+        filter(
+            (event) =>
+                Math.hypot(event.pageX - mouseDownPosition.x, event.pageY - mouseDownPosition.y) <= 4
+        ),
         map((clickEvent) => {
             return { x: clickEvent.pageX, y: clickEvent.pageY };
         })

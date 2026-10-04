@@ -3,6 +3,9 @@ import { Subject } from "rxjs";
 import "./sass.scss";
 import Buefy from "@ntohq/buefy-next";
 
+// collapseActiveTab id of the Inspector tab (index.html)
+const InspectorTab = 7;
+
 const appCreated = createApp({
     data() {
         return {
@@ -60,6 +63,9 @@ const appCreated = createApp({
             msfsAnimationFrameChanged: new Subject(),
             msfsAnimationPlayToggled: new Subject(),
             msfsAnimationReset: new Subject(),
+            inspectorSelectionChanged: new Subject(),
+            inspectorFocus: new Subject(),
+            inspectorHighlightChanged: new Subject(),
             renderEnvChanged: new Subject(),
             addEnvironmentChanged: new Subject(),
             selectedAnimationsChanged: new Subject(),
@@ -146,6 +152,15 @@ const appCreated = createApp({
             msfsAnimations: [],
             msfsFrameRate: 30,
             msfsAnimationFilter: "",
+            // Inspector tab: flat node tree (see logic/inspector.js) and the selected node's details
+            inspectorNodes: [],
+            inspectorExpanded: {},
+            inspectorFilter: "",
+            inspectorSelected: undefined,
+            inspectorDetails: [],
+            // sRGB hex from the colour picker; main.js converts it to linear for the renderer
+            inspectorHighlightColor: "#ffb33f",
+            inspectorHighlightStrength: 0.55,
             morphing: true,
             interactivity: true,
             clearcoatEnabled: true,
@@ -293,6 +308,43 @@ const appCreated = createApp({
         });
     },
     computed: {
+        inspectorOpen() {
+            return this.activeTab === InspectorTab && !this.tabContentHidden;
+        },
+        inspectorSelectedRow() {
+            return this.inspectorNodes.find((row) => row.index === this.inspectorSelected);
+        },
+        visibleInspectorRows() {
+            const filter = this.inspectorFilter.trim().toLowerCase();
+            if (filter !== "") {
+                // matches plus their ancestors, so each match keeps its place in the hierarchy
+                const byIndex = new Map(this.inspectorNodes.map((row) => [row.index, row]));
+                const shown = new Set();
+                for (const row of this.inspectorNodes) {
+                    const haystack = [row.name, row.uniqueId ?? "", ...row.tags].join(" ").toLowerCase();
+                    if (!haystack.includes(filter)) {
+                        continue;
+                    }
+                    for (let index = row.index; index !== undefined && !shown.has(index); index = byIndex.get(index).parent) {
+                        shown.add(index);
+                    }
+                }
+                return this.inspectorNodes.filter((row) => shown.has(row.index));
+            }
+            const rows = [];
+            let collapsedDepth = Infinity;
+            for (const row of this.inspectorNodes) {
+                if (row.depth > collapsedDepth) {
+                    continue;
+                }
+                collapsedDepth = Infinity;
+                rows.push(row);
+                if (row.childCount > 0 && !this.inspectorExpanded[row.index]) {
+                    collapsedDepth = row.depth;
+                }
+            }
+            return rows;
+        },
         filteredMsfsAnimations() {
             const filter = this.msfsAnimationFilter.trim().toLowerCase();
             if (filter === "") {
@@ -488,6 +540,26 @@ const appCreated = createApp({
                 this.tabContentHidden = false;
             }
             this.activeTab = item;
+        },
+        toggleInspectorNode(index) {
+            this.inspectorExpanded[index] = !this.inspectorExpanded[index];
+        },
+        setInspectorExpandedAll(expanded) {
+            const state = {};
+            for (const row of this.inspectorNodes) {
+                state[row.index] = expanded;
+            }
+            this.inspectorExpanded = state;
+        },
+        // Expands the selected node's ancestors and scrolls its row into view (after a viewport pick).
+        revealInspectorNode(index) {
+            const byIndex = new Map(this.inspectorNodes.map((row) => [row.index, row]));
+            for (let parent = byIndex.get(index)?.parent; parent !== undefined; parent = byIndex.get(parent).parent) {
+                this.inspectorExpanded[parent] = true;
+            }
+            this.$nextTick(() => {
+                document.getElementById(`inspectorRow${index}`)?.scrollIntoView({ block: "nearest" });
+            });
         },
         warn(message) {
             this.$buefy.toast.open({

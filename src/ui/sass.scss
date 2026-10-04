@@ -544,3 +544,157 @@ input:invalid {
     accent-color: #87c540;
     margin-top: 0.3em;
 }
+
+/* Inspector tab */
+.inspectorInfo {
+    font-size: 13px;
+    opacity: 0.7;
+    margin-top: 0.25em;
+}
+.inspectorToolbar {
+    display: flex;
+    gap: 0.5em;
+    margin: 0.75em 0 0.5em 0;
+}
+.inspectorToolbar .button {
+    min-width: 28px;
+}
+.inspectorHighlightSettings {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    margin-bottom: 0.5em;
+    font-size: 13px;
+}
+.inspectorHighlightSettings input[type="color"] {
+    width: 32px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid #5a5a5a;
+    border-radius: 3px;
+    background: transparent;
+    cursor: pointer;
+}
+.inspectorHighlightStrength {
+    flex: 1;
+    min-width: 0;
+    accent-color: #87c540;
+}
+.inspectorHighlightValue {
+    flex: 0 0 3em;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.8;
+}
+.inspectorTree {
+    max-height: 38vh;
+    overflow-y: auto;
+    border: 1px solid #3a3a3a;
+    border-radius: 3px;
+    font-size: 13px;
+}
+.inspectorRow {
+    display: flex;
+    align-items: center;
+    gap: 0.3em;
+    padding-top: 1px;
+    padding-bottom: 1px;
+    padding-right: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+    border-left: 3px solid transparent;
+    user-select: none;
+}
+.inspectorRow:hover {
+    background: #2f2f2f;
+}
+.inspectorRow.inspectorRowSelected {
+    background: #3a3226;
+    border-left-color: #ff8a1e;
+}
+.inspectorToggle {
+    flex: 0 0 12px;
+    text-align: center;
+    opacity: 0.7;
+}
+.inspectorName {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.inspectorBadge {
+    flex: 0 0 auto;
+    font-size: 10px;
+    line-height: 14px;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: #3d3d3d;
+    color: #cfcfcf;
+}
+.inspectorBadge-light {
+    background: #5c4b14;
+    color: #ffe08a;
+}
+.inspectorBadge-gizmo,
+.inspectorBadge-tag {
+    background: #4a2a2a;
+    color: #ffb3b3;
+}
+.inspectorBadge-anim {
+    background: #2d4a1c;
+    color: #c3e88d;
+}
+.inspectorDetailsHeader {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    margin: 1em 0 0.5em 0;
+}
+.inspectorDetailsName {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    font-size: 15px;
+}
+.inspectorSection {
+    margin-bottom: 0.75em;
+}
+.inspectorSectionTitle {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.75;
+    border-bottom: 1px solid #3a3a3a;
+    margin-bottom: 0.25em;
+}
+.inspectorTable {
+    width: 100%;
+    font-size: 12px;
+    table-layout: fixed;
+}
+.inspectorTable th {
+    width: 38%;
+    font-weight: normal;
+    opacity: 0.7;
+    padding-right: 0.5em;
+    vertical-align: top;
+}
+.inspectorTable td {
+    word-break: break-word;
+    font-variant-numeric: tabular-nums;
+}
+.inspectorJson {
+    font-size: 11px;
+    line-height: 1.35;
+    padding: 0.4em 0.5em;
+    background: #1e1e1e;
+    color: #d6d6d6;
+    max-height: 18em;
+    overflow: auto;
+    white-space: pre;
+}

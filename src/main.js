@@ -1,6 +1,7 @@
 import { GltfView, ResourceLoaderUtils, Msfs } from "@khronosgroup/gltf-viewer";
 
 import { UIModel } from "./logic/uimodel.js";
+import { buildNodeTree, collectSubtree, getNodeDetails } from "./logic/inspector.js";
 import { app } from "./ui/ui.js";
 import { EMPTY, from, merge } from "rxjs";
 import { mergeMap, map, share, catchError } from "rxjs/operators";
@@ -222,6 +223,7 @@ export default async () => {
                             state.physicsController.loadScene(state, state.sceneIndex);
                             state.physicsController.resumeSimulation();
                         }
+                        setupInspector(gltf, state.sceneIndex);
 
                         uiModel.exitLoadingState();
 
@@ -232,6 +234,7 @@ export default async () => {
                         state.gltf = emptyGltf;
                         state.sceneIndex = 0;
                         state.cameraNodeIndex = undefined;
+                        setupInspector(emptyGltf, 0);
                         uiModel.exitLoadingState();
                         redraw = true;
                         return state;
@@ -718,6 +721,88 @@ export default async () => {
         state.hoverPositions[0].y = Math.floor(selection.y * devicePixelRatio);
     });
     listenForRedraw(uiModel.moveSelection);
+
+    // Inspector: the selected node (and its subtree) is tinted in the view. While the tab is
+    // open, clicking the model selects the part under the cursor; clicking empty space clears it.
+    function setupInspector(gltf, sceneIndex) {
+        app.inspectorNodes = buildNodeTree(gltf, sceneIndex);
+        app.inspectorFilter = "";
+        const expanded = {};
+        for (const row of app.inspectorNodes) {
+            expanded[row.index] = row.depth < 1;
+        }
+        app.inspectorExpanded = expanded;
+        selectInspectorNode(undefined);
+    }
+
+    function selectInspectorNode(index) {
+        app.inspectorSelected = index;
+        if (index === undefined || state.gltf?.nodes[index] === undefined) {
+            app.inspectorSelected = undefined;
+            app.inspectorDetails = [];
+            state.highlightedNodeIndices = new Set();
+        } else {
+            app.inspectorDetails = getNodeDetails(state.gltf, index);
+            state.highlightedNodeIndices = collectSubtree(state.gltf, index);
+        }
+        redraw = true;
+    }
+
+    uiModel.inspectorSelection.subscribe((index) => selectInspectorNode(index));
+
+    // Highlight colour: the picker gives sRGB, the shader blends in linear space.
+    // Remembered per browser; storage may be unavailable (private mode), so it is optional.
+    const HighlightStorageKey = "inspectorHighlight";
+    const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+    const applyInspectorHighlight = ({ color, strength }) => {
+        const match = /^#([0-9a-f]{6})$/i.exec(color ?? "");
+        if (!match || !(strength >= 0 && strength <= 1)) {
+            return false;
+        }
+        const value = parseInt(match[1], 16);
+        state.renderingParameters.highlightColor = [16, 8, 0].map((shift) =>
+            srgbToLinear(((value >> shift) & 0xff) / 255)
+        );
+        state.renderingParameters.highlightStrength = strength;
+        app.inspectorHighlightColor = color.toLowerCase();
+        app.inspectorHighlightStrength = strength;
+        return true;
+    };
+    try {
+        applyInspectorHighlight(JSON.parse(window.localStorage.getItem(HighlightStorageKey)) ?? {});
+    } catch {
+        // keep the default highlight
+    }
+    uiModel.inspectorHighlight.subscribe((highlight) => {
+        if (!applyInspectorHighlight(highlight)) {
+            return;
+        }
+        try {
+            window.localStorage.setItem(HighlightStorageKey, JSON.stringify(highlight));
+        } catch {
+            // not remembered, still applied
+        }
+    });
+    listenForRedraw(uiModel.inspectorHighlight);
+
+    uiModel.inspectorFocus.subscribe((index) => {
+        if (state.gltf === undefined || state.cameraNodeIndex !== undefined) {
+            return;
+        }
+        state.userCamera.focusOnNode(state.gltf, index);
+        redraw = true;
+    });
+
+    state.selectionCallback = (pickingResult) => {
+        if (!app.inspectorOpen) {
+            return;
+        }
+        const index = pickingResult.node?.gltfObjectIndex;
+        selectInspectorNode(index);
+        if (index !== undefined) {
+            app.revealInspectorNode(index);
+        }
+    };
 
     // MSFS animations: each animation is positioned by frame, like the sim variable driving it.
     // Active animations (scrubbed or playing) are evaluated at their own time via
