@@ -3,8 +3,9 @@ import { Subject } from "rxjs";
 import "./sass.scss";
 import Buefy from "@ntohq/buefy-next";
 
-// collapseActiveTab id of the Inspector tab (index.html)
+// collapseActiveTab ids of the Inspector and Materials tabs (index.html)
 const InspectorTab = 7;
+const MaterialsTab = 8;
 
 const appCreated = createApp({
     data() {
@@ -68,6 +69,13 @@ const appCreated = createApp({
             inspectorSelectionChanged: new Subject(),
             inspectorFocus: new Subject(),
             inspectorHighlightChanged: new Subject(),
+            materialSelectionChanged: new Subject(),
+            materialViewChanged: new Subject(),
+            materialFactorChanged: new Subject(),
+            materialTextureToggled: new Subject(),
+            materialReset: new Subject(),
+            materialTextureOpened: new Subject(),
+            textureViewerChanged: new Subject(),
             modelReloadRequested: new Subject(),
             textureFolderAdd: new Subject(),
             textureFolderRemove: new Subject(),
@@ -172,6 +180,33 @@ const appCreated = createApp({
             // sRGB hex from the colour picker; main.js converts it to linear for the renderer
             inspectorHighlightColor: "#ffb33f",
             inspectorHighlightStrength: 0.55,
+            // Materials tab (logic/materials.js): list, selected material's textures and factors
+            materialsList: [],
+            materialsFilter: "",
+            materialsSelected: undefined,
+            materialHighlight: true,
+            materialIsolate: false,
+            materialInfo: [],
+            materialTextures: [],
+            materialFactors: [],
+            materialUsers: [],
+            materialEdited: false,
+            materialEditedCount: 0,
+            // Texture viewer dialog; the pixels are drawn by main.js into #textureViewerCanvas
+            textureViewer: {
+                open: false,
+                title: "",
+                file: "",
+                textureIndex: undefined,
+                channel: "rgb",
+                maxSize: 1024,
+                width: 0,
+                height: 0,
+                sourceWidth: 0,
+                sourceHeight: 0,
+                channelHints: {},
+                pixel: ""
+            },
             // Texture lookup folders (logic/texture_folders.js rows)
             textureFoldersSupported: true,
             textureFolders: [],
@@ -327,6 +362,19 @@ const appCreated = createApp({
         },
         inspectorOpen() {
             return this.activeTab === InspectorTab && !this.tabContentHidden;
+        },
+        materialsOpen() {
+            return this.activeTab === MaterialsTab && !this.tabContentHidden;
+        },
+        materialsSelectedRow() {
+            return this.materialsList.find((row) => row.index === this.materialsSelected);
+        },
+        visibleMaterials() {
+            const filter = this.materialsFilter.trim().toLowerCase();
+            if (filter === "") {
+                return this.materialsList;
+            }
+            return this.materialsList.filter((row) => row.search.includes(filter) || String(row.index) === filter);
         },
         inspectorSelectedRow() {
             return this.inspectorNodes.find((row) => row.index === this.inspectorSelected);
@@ -582,6 +630,26 @@ const appCreated = createApp({
                 state[row.index] = expanded;
             }
             this.inspectorExpanded = state;
+        },
+        // Switches to a sidebar tab by clicking its header, as the user would.
+        showTab(id) {
+            if (this.activeTab !== id || this.tabContentHidden) {
+                document.getElementById(`tabHeader${id}`)?.click();
+            }
+        },
+        showMaterial(index) {
+            this.showTab(MaterialsTab);
+            this.materialSelectionChanged.next(index);
+        },
+        showInspectorNode(index) {
+            this.showTab(InspectorTab);
+            this.inspectorSelectionChanged.next(index);
+            this.revealInspectorNode(index);
+        },
+        revealMaterial(index) {
+            this.$nextTick(() => {
+                document.getElementById(`materialRow${index}`)?.scrollIntoView({ block: "nearest" });
+            });
         },
         // Expands the selected node's ancestors and scrolls its row into view (after a viewport pick).
         revealInspectorNode(index) {

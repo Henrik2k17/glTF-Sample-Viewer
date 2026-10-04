@@ -78,6 +78,13 @@ class UIModel {
         this.inspectorSelection = app.inspectorSelectionChanged.pipe();
         this.inspectorFocus = app.inspectorFocus.pipe();
         this.inspectorHighlight = app.inspectorHighlightChanged.pipe();
+        this.materialSelection = app.materialSelectionChanged.pipe();
+        this.materialView = app.materialViewChanged.pipe();
+        this.materialFactor = app.materialFactorChanged.pipe();
+        this.materialTextureToggle = app.materialTextureToggled.pipe();
+        this.materialReset = app.materialReset.pipe();
+        this.materialTextureOpen = app.materialTextureOpened.pipe();
+        this.textureViewer = app.textureViewerChanged.pipe();
         this.textureFolderAdd = app.textureFolderAdd.pipe();
         this.textureFolderRemove = app.textureFolderRemove.pipe();
         this.textureFolderMove = app.textureFolderMove.pipe();

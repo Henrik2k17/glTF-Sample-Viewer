@@ -600,7 +600,7 @@
                         <!-- Inspector tab: node tree, selected node's details and MSFS data -->
                         <b-tab-item label="Inspector" icon="video" class="tabItemScrollable tab-item" v-if="inspectorNodes.length > 0" :order="3.5">
                             <template #header>
-                                <div @click="collapseActiveTab($event, 7)"
+                                <div id="tabHeader7" @click="collapseActiveTab($event, 7)"
                                     v-bind:style="[tabContentHidden === false && activeTab === 7 ? {'height': '100%'} : {}]">
                                     <img v-bind:src="[tabContentHidden === false && activeTab === 7 ? 'assets/ui/Inspector 50X50.svg' : 'assets/ui/Inspector 30X30.svg']"
                                         v-bind:width="[tabContentHidden === false && activeTab === 7 ? '50px' : '30px']"
@@ -671,7 +671,149 @@
                                                 <td>{{ row[1] }}</td>
                                             </tr>
                                         </table>
+                                        <a v-if="section.materialIndex !== undefined" class="inspectorLink" v-on:click="showMaterial(section.materialIndex)">Open in Materials &rarr;</a>
                                         <pre v-if="section.json" class="inspectorJson">{{ section.json }}</pre>
+                                    </div>
+                                </template>
+                            </div>
+                        </b-tab-item>
+
+                        <!-- Materials tab: material list, selected material's textures, factors and users -->
+                        <b-tab-item label="Materials" icon="video" class="tabItemScrollable tab-item" v-if="materialsList.length > 0" :order="3.6">
+                            <template #header>
+                                <div id="tabHeader8" @click="collapseActiveTab($event, 8)"
+                                    v-bind:style="[tabContentHidden === false && activeTab === 8 ? {'height': '100%'} : {}]">
+                                    <img v-bind:src="[tabContentHidden === false && activeTab === 8 ? 'assets/ui/Materials 50X50.svg' : 'assets/ui/Materials 30X30.svg']"
+                                        v-bind:width="[tabContentHidden === false && activeTab === 8 ? '50px' : '30px']"
+                                        v-bind:style="[tabContentHidden === false && activeTab === 8 ? {'height': '100%'} : {}]">
+                                    <span
+                                        v-show='isMobile === false && (tabContentHidden === true || activeTab !== 8)'>
+                                        Materials
+                                    </span>
+                                </div>
+                            </template>
+
+                            <div class="tabContent">
+                                <img src="assets/ui/Navigation_right_20px.svg" class="tabNavigationIcon" width="30px"
+                                    @click="collapseActiveTab($event, 8)">
+                                <h2 class="title is-spaced" style="margin-bottom: 0.5em;">Materials</h2>
+                                <p class="inspectorInfo">{{ materialsList.length }} materials &middot; click a part in the view to select its material</p>
+                                <div class="inspectorToolbar">
+                                    <input class="input is-small" type="search" placeholder="Filter by name, type or texture file" v-model="materialsFilter">
+                                </div>
+                                <div class="inspectorTree materialList">
+                                    <div v-for="row in visibleMaterials" v-bind:key="row.index" v-bind:id="'materialRow' + row.index"
+                                        class="inspectorRow" v-bind:class="{ inspectorRowSelected: row.index === materialsSelected }"
+                                        v-bind:title="row.code ? row.name + ' (' + row.code + ')' : row.name"
+                                        v-on:click="materialSelectionChanged.next(row.index)">
+                                        <span class="materialIndex">{{ row.index }}</span>
+                                        <span class="inspectorName">{{ row.name }}</span>
+                                        <span v-if="row.missing > 0" class="inspectorBadge inspectorBadge-tag" title="Textures that could not be loaded">{{ row.missing }} missing</span>
+                                        <span v-for="badge in row.badges" v-bind:key="badge" class="inspectorBadge">{{ badge }}</span>
+                                        <span v-if="row.nodeCount === 0" class="inspectorBadge" title="Not used by any node">unused</span>
+                                        <span class="materialCount" title="Textures">{{ row.textureCount }} tex</span>
+                                    </div>
+                                </div>
+                                <template v-if="materialsSelectedRow">
+                                    <div class="inspectorDetailsHeader">
+                                        <span class="inspectorDetailsName" v-bind:title="materialsSelectedRow.name">{{ materialsSelectedRow.name }}</span>
+                                        <button class="button is-small is-rounded is-outlined" v-on:click="materialSelectionChanged.next(undefined)">Clear</button>
+                                    </div>
+                                    <div class="materialViewOptions">
+                                        <label class="checkbox" title="Tint the parts using this material (colour as set in the Inspector)">
+                                            <input type="checkbox" v-model="materialHighlight"
+                                                v-on:change="materialViewChanged.next({ highlight: materialHighlight, isolate: materialIsolate })">
+                                            Highlight
+                                        </label>
+                                        <label class="checkbox" title="Show only the parts using this material">
+                                            <input type="checkbox" v-model="materialIsolate"
+                                                v-on:change="materialViewChanged.next({ highlight: materialHighlight, isolate: materialIsolate })">
+                                            Isolate
+                                        </label>
+                                    </div>
+                                    <div class="inspectorSection">
+                                        <div class="inspectorSectionTitle">Material {{ materialsSelected }}</div>
+                                        <table class="inspectorTable">
+                                            <tr v-for="(row, rowIndex) in materialInfo" v-bind:key="rowIndex" v-bind:title="row[2]">
+                                                <th>{{ row[0] }}</th>
+                                                <td>{{ row[1] }}</td>
+                                            </tr>
+                                        </table>
+                                    </div>
+
+                                    <div class="inspectorSection">
+                                        <div class="inspectorSectionTitle">Textures ({{ materialTextures.length }})</div>
+                                        <p v-if="materialTextures.length === 0" class="inspectorInfo">No textures.</p>
+                                        <div v-for="texture in materialTextures" v-bind:key="texture.id" class="materialTexture"
+                                            v-bind:class="'materialTexture-' + texture.status">
+                                            <div class="materialThumb" v-bind:title="texture.textureIndex !== undefined ? 'Open in the texture viewer' : ''"
+                                                v-on:click="texture.textureIndex !== undefined && materialTextureOpened.next(texture.id)">
+                                                <img v-if="texture.thumbnail" v-bind:src="texture.thumbnail">
+                                                <span v-else class="materialThumbMissing">{{ texture.status === 'missing' ? 'missing' : '…' }}</span>
+                                            </div>
+                                            <div class="materialTextureText">
+                                                <div class="materialTextureTitle">
+                                                    <span class="materialTextureLabel">
+                                                        <span v-if="texture.group" class="materialTextureGroup">{{ texture.group }} &middot; </span>{{ texture.label }}
+                                                    </span>
+                                                    <span class="materialStatus" v-bind:class="'materialStatus-' + texture.status"
+                                                        v-bind:title="{ ok: 'Used for rendering', off: 'Switched off: rendered as if absent', missing: 'The image could not be loaded', unused: 'Loaded, but this viewer does not render it' }[texture.status]">{{ texture.status }}</span>
+                                                    <label v-if="texture.status === 'ok' || texture.status === 'off'" class="materialTextureToggle"
+                                                        title="Switch the texture off to see the material without it">
+                                                        <input type="checkbox" v-bind:checked="texture.status === 'ok'"
+                                                            v-on:change="materialTextureToggled.next({ id: texture.id, enabled: $event.target.checked })">
+                                                    </label>
+                                                </div>
+                                                <div class="materialTextureFile" v-bind:title="texture.file">
+                                                    {{ texture.file }}<span v-if="texture.width"> &middot; {{ texture.width }}&times;{{ texture.height }}</span>
+                                                </div>
+                                                <table class="inspectorTable materialTextureRows">
+                                                    <tr v-for="(row, rowIndex) in texture.rows" v-bind:key="rowIndex">
+                                                        <th>{{ row[0] }}</th>
+                                                        <td>{{ row[1] }}</td>
+                                                    </tr>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="inspectorSection">
+                                        <div class="inspectorSectionTitle materialFactorsTitle">
+                                            <span>Factors (live, not saved)</span>
+                                            <button class="button is-small is-rounded is-outlined" v-bind:disabled="!materialEdited"
+                                                v-on:click="materialReset.next(materialsSelected)">Reset</button>
+                                        </div>
+                                        <div v-for="factor in materialFactors" v-bind:key="factor.key" class="materialFactor"
+                                            v-bind:class="{ materialFactorEdited: factor.edited }">
+                                            <span class="materialFactorLabel">{{ factor.label }}</span>
+                                            <template v-if="factor.type === 'color'">
+                                                <input type="color" v-bind:value="factor.value"
+                                                    v-on:input="materialFactorChanged.next({ key: factor.key, value: $event.target.value })">
+                                                <span class="materialFactorValue">{{ factor.value }}</span>
+                                            </template>
+                                            <template v-else>
+                                                <input type="range" class="materialFactorRange" min="0" v-bind:max="factor.max" step="0.01"
+                                                    v-bind:value="factor.value"
+                                                    v-on:input="materialFactorChanged.next({ key: factor.key, value: Number($event.target.value) })">
+                                                <input type="number" class="materialFactorNumber" min="0" step="0.01"
+                                                    v-bind:value="Math.round(factor.value * 1000) / 1000"
+                                                    v-on:change="materialFactorChanged.next({ key: factor.key, value: Number($event.target.value) })">
+                                            </template>
+                                        </div>
+                                        <p v-if="materialEditedCount > 0" class="inspectorInfo">{{ materialEditedCount }} material(s) edited in this session.</p>
+                                    </div>
+
+                                    <div class="inspectorSection">
+                                        <div class="inspectorSectionTitle">Used by ({{ materialUsers.length }} nodes)</div>
+                                        <p v-if="materialUsers.length === 0" class="inspectorInfo">No node uses this material.</p>
+                                        <div class="materialUsers">
+                                            <div v-for="user in materialUsers" v-bind:key="user.nodeIndex" class="inspectorRow"
+                                                v-bind:title="'Show ' + user.name + ' in the Inspector'"
+                                                v-on:click="showInspectorNode(user.nodeIndex)">
+                                                <span class="inspectorName">{{ user.name }}</span>
+                                                <span class="inspectorBadge" v-if="user.primitives > 1">{{ user.primitives }} primitives</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </template>
                             </div>
@@ -883,6 +1025,40 @@
                         </b-tab-item>
 
                     </b-tabs>
+
+                    <!-- Texture viewer (Materials tab); main.js draws the pixels into #textureViewerCanvas -->
+                    <div v-if="textureViewer.open" class="textureViewer" v-on:click.self="textureViewerChanged.next({ open: false })"
+                        v-on:keydown.esc="textureViewerChanged.next({ open: false })" tabindex="-1">
+                        <div class="textureViewerPanel">
+                            <div class="textureViewerHeader">
+                                <div class="textureViewerTitle">
+                                    <span>{{ textureViewer.title }}</span>
+                                    <span class="textureViewerFile">{{ textureViewer.file }} &middot; {{ textureViewer.sourceWidth }}&times;{{ textureViewer.sourceHeight }}<span
+                                        v-if="textureViewer.width !== textureViewer.sourceWidth"> (shown at {{ textureViewer.width }}&times;{{ textureViewer.height }})</span></span>
+                                </div>
+                                <button class="delete" aria-label="Close" v-on:click="textureViewerChanged.next({ open: false })"></button>
+                            </div>
+                            <div class="textureViewerToolbar">
+                                <div class="buttons has-addons">
+                                    <button v-for="channel in ['rgba', 'rgb', 'r', 'g', 'b', 'a']" v-bind:key="channel"
+                                        class="button is-small" v-bind:class="{ 'is-selected': textureViewer.channel === channel }"
+                                        v-bind:title="textureViewer.channelHints[channel] ?? ''"
+                                        v-on:click="textureViewerChanged.next({ channel })">
+                                        {{ channel.toUpperCase() }}<span v-if="textureViewer.channelHints[channel]" class="textureViewerHint">&nbsp;{{ textureViewer.channelHints[channel] }}</span>
+                                    </button>
+                                </div>
+                                <div class="select is-small">
+                                    <select v-bind:value="textureViewer.maxSize" v-on:change="textureViewerChanged.next({ maxSize: Number($event.target.value) })">
+                                        <option v-for="size in [512, 1024, 2048, 4096]" v-bind:key="size" v-bind:value="size">max {{ size }} px</option>
+                                    </select>
+                                </div>
+                                <span class="textureViewerPixel">{{ textureViewer.pixel }}</span>
+                            </div>
+                            <div class="textureViewerImage">
+                                <canvas id="textureViewerCanvas"></canvas>
+                            </div>
+                        </div>
+                    </div>
                 
             </div>
         </div>

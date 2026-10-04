@@ -1,7 +1,21 @@
 import { GltfView, Msfs } from "@khronosgroup/gltf-viewer";
 
 import { UIModel } from "./logic/uimodel.js";
-import { buildNodeTree, collectSubtree, getMsfsMaterialSummary, getNodeDetails } from "./logic/inspector.js";
+import {
+    buildNodeTree,
+    collectSubtree,
+    getMsfsMaterialSummary,
+    getNodeDetails,
+    materialSections,
+    nodeTitle
+} from "./logic/inspector.js";
+import {
+    buildMaterialList,
+    getChannelHints,
+    getMaterialTextureSlots,
+    getMaterialUsage,
+    MaterialEdits
+} from "./logic/materials.js";
 import { TextureFolders } from "./logic/texture_folders.js";
 import { app } from "./ui/ui.js";
 import { EMPTY, Observable, from, merge } from "rxjs";
@@ -193,6 +207,7 @@ export default async () => {
                             state.physicsController.resumeSimulation();
                         }
                         setupInspector(gltf, state.sceneIndex);
+                        setupMaterials(gltf);
 
                         uiModel.exitLoadingState();
 
@@ -204,6 +219,7 @@ export default async () => {
                         state.sceneIndex = 0;
                         state.cameraNodeIndex = undefined;
                         setupInspector(emptyGltf, 0);
+                        setupMaterials(emptyGltf);
                         uiModel.exitLoadingState();
                         redraw = true;
                         return state;
@@ -795,6 +811,19 @@ export default async () => {
     });
 
     state.selectionCallback = (pickingResult) => {
+        if (app.materialsOpen) {
+            const mesh = state.gltf.meshes[pickingResult.node?.mesh];
+            const material = mesh?.primitives[pickingResult.primitiveIndex]?.material;
+            // While isolated, a click next to the part should not bring everything back.
+            if (material === undefined && app.materialIsolate) {
+                return;
+            }
+            selectMaterial(material);
+            if (material !== undefined) {
+                app.revealMaterial(material);
+            }
+            return;
+        }
         if (!app.inspectorOpen) {
             return;
         }
@@ -804,6 +833,221 @@ export default async () => {
             app.revealInspectorNode(index);
         }
     };
+
+    // Materials tab: the selected material's parts are tinted (or shown alone), its textures are
+    // read back from the GPU for thumbnails and the texture viewer, and its factors can be edited
+    // live. Nothing is written back to the file.
+    const materialEdits = new MaterialEdits();
+    let materialSlots = []; // [{slot, bound}] of the selected material; bound is the renderer's textureInfo
+    let materialUsage = new Map();
+    let thumbnails = new Map(); // texture index -> data URL, for the loaded glTF
+
+    function setupMaterials(gltf) {
+        materialEdits.clear();
+        thumbnails = new Map();
+        materialUsage = getMaterialUsage(gltf);
+        app.materialsList = buildMaterialList(gltf);
+        app.materialsFilter = "";
+        app.materialEditedCount = 0;
+        closeTextureViewer();
+        selectMaterial(undefined);
+    }
+
+    function pixelsToDataUrl({ width, height, pixels }) {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").putImageData(new ImageData(pixels, width, height), 0, 0);
+        return canvas.toDataURL();
+    }
+
+    function getThumbnail(textureIndex) {
+        if (textureIndex === undefined) {
+            return undefined;
+        }
+        if (!thumbnails.has(textureIndex)) {
+            const result = view.readTexture(state, textureIndex, 128);
+            thumbnails.set(textureIndex, result === undefined ? undefined : pixelsToDataUrl(result));
+        }
+        return thumbnails.get(textureIndex);
+    }
+
+    function applyMaterialView() {
+        const index = app.materialsSelected;
+        state.highlightedMaterialIndices =
+            index !== undefined && app.materialHighlight ? new Set([index]) : new Set();
+        // A new set each time: the renderer rebuilds its draw lists when the reference changes.
+        state.isolatedMaterialIndices =
+            index !== undefined && app.materialIsolate ? new Set([index]) : undefined;
+        redraw = true;
+    }
+
+    function refreshMaterialDetails() {
+        const index = app.materialsSelected;
+        const gltf = state.gltf;
+        materialSlots = getMaterialTextureSlots(gltf, index);
+        app.materialTextures = materialSlots.map(({ slot }) => ({ ...slot, thumbnail: getThumbnail(slot.textureIndex) }));
+        app.materialFactors = materialEdits.getFactors(gltf, index);
+        app.materialEdited =
+            materialEdits.isEdited(index) || materialSlots.some(({ slot }) => slot.status === "off");
+        app.materialEditedCount = materialEdits.originals.size;
+        const material = gltf.materials[index];
+        const otherExtensions = Object.keys(material.extensions ?? {}).filter((name) => !name.startsWith("ASOBO_"));
+        const info = [...(materialSections(gltf, index)[0]?.rows ?? [])];
+        if (material.alphaMode === "MASK") {
+            info.splice(1, 0, ["Alpha cutoff", String(material.alphaCutoff)]);
+        }
+        if (otherExtensions.length > 0) {
+            info.push(["Extensions", otherExtensions.join(", ")]);
+        }
+        app.materialInfo = info;
+        app.materialUsers = [...(materialUsage.get(index) ?? new Map())].map(([nodeIndex, primitives]) => ({
+            nodeIndex,
+            name: nodeTitle(gltf.nodes[nodeIndex], nodeIndex),
+            primitives: primitives.length
+        }));
+    }
+
+    function selectMaterial(index) {
+        if (index !== undefined && state.gltf?.materials[index] === undefined) {
+            index = undefined;
+        }
+        app.materialsSelected = index;
+        if (index === undefined) {
+            materialSlots = [];
+            app.materialTextures = [];
+            app.materialFactors = [];
+            app.materialUsers = [];
+            app.materialInfo = [];
+            app.materialEdited = false;
+        } else {
+            refreshMaterialDetails();
+        }
+        applyMaterialView();
+    }
+
+    uiModel.materialSelection.subscribe((index) => selectMaterial(index));
+    uiModel.materialView.subscribe(() => applyMaterialView());
+
+    uiModel.materialFactor.subscribe(({ key, value }) => {
+        if (app.materialsSelected === undefined) {
+            return;
+        }
+        materialEdits.set(state.gltf, app.materialsSelected, key, value);
+        app.materialFactors = materialEdits.getFactors(state.gltf, app.materialsSelected);
+        app.materialEdited = true;
+        app.materialEditedCount = materialEdits.originals.size;
+        redraw = true;
+    });
+
+    uiModel.materialTextureToggle.subscribe(({ id, enabled }) => {
+        const entry = materialSlots.find(({ slot }) => slot.id === id);
+        if (entry?.bound === undefined) {
+            return;
+        }
+        entry.bound.debugDisabled = !enabled;
+        refreshMaterialDetails();
+        redraw = true;
+    });
+
+    uiModel.materialReset.subscribe((index) => {
+        materialEdits.reset(state.gltf, index);
+        refreshMaterialDetails();
+        redraw = true;
+    });
+
+    // Texture viewer
+    let viewerResult = undefined; // {width, height, pixels} read back at textureViewer.maxSize
+
+    function closeTextureViewer() {
+        app.textureViewer.open = false;
+        viewerResult = undefined;
+    }
+
+    function drawTextureViewer() {
+        const canvas = document.getElementById("textureViewerCanvas");
+        if (canvas === null || viewerResult === undefined) {
+            return;
+        }
+        const { width, height, pixels } = viewerResult;
+        canvas.width = width;
+        canvas.height = height;
+        const out = new Uint8ClampedArray(pixels.length);
+        const channel = app.textureViewer.channel;
+        const single = { r: 0, g: 1, b: 2, a: 3 }[channel];
+        for (let i = 0; i < pixels.length; i += 4) {
+            if (single !== undefined) {
+                out[i] = out[i + 1] = out[i + 2] = pixels[i + single];
+                out[i + 3] = 255;
+            } else {
+                out[i] = pixels[i];
+                out[i + 1] = pixels[i + 1];
+                out[i + 2] = pixels[i + 2];
+                out[i + 3] = channel === "rgba" ? pixels[i + 3] : 255;
+            }
+        }
+        canvas.getContext("2d").putImageData(new ImageData(out, width, height), 0, 0);
+        canvas.onmousemove = (event) => {
+            const x = Math.min(width - 1, Math.floor((event.offsetX / canvas.clientWidth) * width));
+            const y = Math.min(height - 1, Math.floor((event.offsetY / canvas.clientHeight) * height));
+            const i = (y * width + x) * 4;
+            const sourceX = Math.floor((x / width) * app.textureViewer.sourceWidth);
+            const sourceY = Math.floor((y / height) * app.textureViewer.sourceHeight);
+            const [r, g, b, a] = pixels.slice(i, i + 4);
+            app.textureViewer.pixel = `x ${sourceX}, y ${sourceY}: R ${r} G ${g} B ${b} A ${a}`;
+        };
+        canvas.onmouseleave = () => (app.textureViewer.pixel = "");
+    }
+
+    function loadTextureViewer() {
+        viewerResult = view.readTexture(state, app.textureViewer.textureIndex, app.textureViewer.maxSize);
+        if (viewerResult === undefined) {
+            closeTextureViewer();
+            app.warn("The texture could not be read.");
+            return;
+        }
+        Object.assign(app.textureViewer, {
+            width: viewerResult.width,
+            height: viewerResult.height,
+            sourceWidth: viewerResult.sourceWidth,
+            sourceHeight: viewerResult.sourceHeight
+        });
+        app.$nextTick(drawTextureViewer);
+    }
+
+    uiModel.materialTextureOpen.subscribe((id) => {
+        const slot = materialSlots.find((entry) => entry.slot.id === id)?.slot;
+        if (slot?.textureIndex === undefined) {
+            return;
+        }
+        Object.assign(app.textureViewer, {
+            open: true,
+            title: slot.group ? `${slot.group} · ${slot.label}` : slot.label,
+            file: slot.file,
+            textureIndex: slot.textureIndex,
+            channelHints: getChannelHints(slot.id),
+            pixel: ""
+        });
+        loadTextureViewer();
+    });
+
+    uiModel.textureViewer.subscribe((change) => {
+        if (change.open === false) {
+            closeTextureViewer();
+        } else if (change.channel !== undefined) {
+            app.textureViewer.channel = change.channel;
+            drawTextureViewer();
+        } else if (change.maxSize !== undefined) {
+            app.textureViewer.maxSize = change.maxSize;
+            loadTextureViewer();
+        }
+    });
+
+    window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && app.textureViewer.open) {
+            closeTextureViewer();
+        }
+    });
 
     // MSFS animations: each animation is positioned by frame, like the sim variable driving it.
     // Active animations (scrubbed or playing) are evaluated at their own time via

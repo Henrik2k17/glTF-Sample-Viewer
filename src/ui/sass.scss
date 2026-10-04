@@ -785,3 +785,286 @@ input:invalid {
     background: #4a2a2a;
     color: #ffb3b3;
 }
+
+/* Materials tab */
+.inspectorLink {
+    display: inline-block;
+    font-size: 12px;
+    margin-top: 0.2em;
+    color: #87c540;
+    cursor: pointer;
+}
+.materialList {
+    max-height: 30vh;
+}
+.materialIndex {
+    flex: 0 0 2.2em;
+    text-align: right;
+    padding-right: 0.3em;
+    opacity: 0.5;
+    font-variant-numeric: tabular-nums;
+}
+.materialCount {
+    flex: 0 0 auto;
+    font-size: 11px;
+    opacity: 0.55;
+}
+.materialViewOptions {
+    display: flex;
+    gap: 1.25em;
+    margin-bottom: 0.75em;
+    font-size: 13px;
+}
+.materialViewOptions input {
+    accent-color: #87c540;
+    margin-right: 0.3em;
+}
+$checker: repeating-conic-gradient(#555 0% 25%, #3a3a3a 0% 50%) 50% / 12px 12px;
+.materialTexture {
+    display: flex;
+    gap: 0.6em;
+    padding: 0.4em 0;
+    border-bottom: 1px solid #333;
+}
+.materialTexture:last-child {
+    border-bottom: none;
+}
+.materialThumb {
+    flex: 0 0 72px;
+    height: 72px;
+    background: $checker;
+    border: 1px solid #4a4a4a;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    cursor: pointer;
+}
+.materialThumb img {
+    max-width: 100%;
+    max-height: 100%;
+    image-rendering: auto;
+}
+.materialThumbMissing {
+    font-size: 11px;
+    color: #ffb3b3;
+}
+.materialTexture-missing .materialThumb {
+    background: #2a1f1f;
+    cursor: default;
+}
+.materialTexture-off .materialThumb img {
+    opacity: 0.35;
+}
+.materialTextureText {
+    flex: 1;
+    min-width: 0;
+}
+.materialTextureTitle {
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    font-size: 13px;
+}
+.materialTextureLabel {
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.materialTextureGroup {
+    font-weight: normal;
+    opacity: 0.65;
+}
+.materialStatus {
+    flex: 0 0 auto;
+    font-size: 10px;
+    line-height: 14px;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: #3d3d3d;
+}
+.materialStatus-ok {
+    background: #2d4a1c;
+    color: #c3e88d;
+}
+.materialStatus-off {
+    background: #5c4b14;
+    color: #ffe08a;
+}
+.materialStatus-missing {
+    background: #4a2a2a;
+    color: #ffb3b3;
+}
+.materialTextureToggle input {
+    accent-color: #87c540;
+    vertical-align: middle;
+}
+.materialTextureFile {
+    font-size: 12px;
+    opacity: 0.8;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.materialTextureRows {
+    font-size: 11px;
+    margin-top: 0.15em;
+}
+.materialFactorsTitle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 0.2em;
+}
+.materialFactorsTitle .button {
+    height: 1.6em;
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: normal;
+}
+.materialFactor {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    font-size: 12px;
+    padding: 1px 0 1px 4px;
+    border-left: 3px solid transparent;
+}
+.materialFactor.materialFactorEdited {
+    border-left-color: #ff8a1e;
+}
+.materialFactorLabel {
+    flex: 0 0 38%;
+    opacity: 0.8;
+}
+.materialFactor input[type="color"] {
+    width: 32px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid #5a5a5a;
+    border-radius: 3px;
+    background: transparent;
+    cursor: pointer;
+}
+.materialFactorValue {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.8;
+}
+.materialFactorRange {
+    flex: 1;
+    min-width: 0;
+    accent-color: #87c540;
+}
+.materialFactorNumber {
+    flex: 0 0 4.5em;
+    width: 4.5em;
+    font-size: 12px;
+    background: #2a2a2a;
+    color: #f2f2f2;
+    border: 1px solid #4a4a4a;
+    border-radius: 3px;
+    padding: 0 3px;
+}
+.materialUsers {
+    max-height: 20vh;
+    overflow-y: auto;
+    font-size: 13px;
+}
+
+/* Texture viewer dialog */
+.textureViewer {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.textureViewerPanel {
+    width: min(92vw, 1100px);
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+    background: #262626;
+    color: #f2f2f2;
+    border-radius: 6px;
+    padding: 0.75em;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+.textureViewerHeader {
+    display: flex;
+    align-items: flex-start;
+    gap: 1em;
+}
+.textureViewerTitle {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    font-weight: 600;
+}
+.textureViewerFile {
+    font-weight: normal;
+    font-size: 12px;
+    opacity: 0.75;
+}
+.textureViewerToolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75em;
+    margin: 0.5em 0;
+}
+.textureViewerToolbar .buttons {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+}
+.textureViewerToolbar .buttons .button {
+    margin-bottom: 0;
+    background: #3a3a3a;
+    border-color: #555;
+    color: #f2f2f2;
+}
+.textureViewerToolbar .buttons .button.is-selected {
+    background: #87c540;
+    border-color: #87c540;
+    color: #1e1e1e;
+}
+.textureViewerToolbar .select {
+    flex: 0 0 auto;
+}
+.textureViewerToolbar .select select {
+    width: auto;
+    background: #3a3a3a;
+    border-color: #555;
+    color: #f2f2f2;
+}
+.textureViewerHint {
+    opacity: 0.7;
+    font-size: 10px;
+}
+.textureViewerPixel {
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.85;
+}
+.textureViewerImage {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: $checker;
+}
+.textureViewerImage canvas {
+    max-width: 100%;
+    max-height: calc(92vh - 9em);
+    object-fit: contain;
+    image-rendering: pixelated;
+}

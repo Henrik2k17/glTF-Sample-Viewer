@@ -293,7 +293,7 @@ function materialSections(gltf, materialIndex) {
     const asobo = Object.fromEntries(
         Object.entries(material.extensions ?? {}).filter(([name]) => name.startsWith("ASOBO_"))
     );
-    const section = { title, rows };
+    const section = { title, rows, materialIndex };
     if (Object.keys(asobo).length > 0) {
         section.json = formatJson(asobo);
     }
@@ -424,4 +424,13 @@ function getNodeDetails(gltf, nodeIndex) {
     return sections;
 }
 
-export { buildNodeTree, collectSubtree, getMsfsMaterialSummary, getNodeDetails };
+export {
+    buildNodeTree,
+    collectSubtree,
+    formatNumber,
+    getMsfsMaterialSummary,
+    getNodeDetails,
+    isPlainJson,
+    materialSections,
+    nodeTitle
+};
