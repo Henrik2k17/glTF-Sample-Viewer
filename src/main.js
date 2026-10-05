@@ -760,7 +760,8 @@ export default async () => {
     uiModel.textureFolderMove.subscribe(({ id, offset }) => textureFolders.move(id, offset));
     uiModel.textureFolderRescan.subscribe((id) => textureFolders.rescan(id));
 
-    // Tinted nodes and materials come from several tabs; the renderer gets their union.
+    // Tinted nodes and materials come from several tabs; only the open tab's tint is shown.
+    // Selections are kept, so the tint comes back when the tab is opened again.
     const highlights = {
         inspectorNodes: new Set(),
         animationNodes: new Set(),
@@ -768,13 +769,18 @@ export default async () => {
         animationMaterials: new Set()
     };
     function refreshHighlights() {
-        state.highlightedNodeIndices = new Set([...highlights.inspectorNodes, ...highlights.animationNodes]);
+        const empty = new Set();
+        state.highlightedNodeIndices = new Set([
+            ...(app.inspectorOpen ? highlights.inspectorNodes : empty),
+            ...(app.animationsOpen ? highlights.animationNodes : empty)
+        ]);
         state.highlightedMaterialIndices = new Set([
-            ...highlights.materialsMaterials,
-            ...highlights.animationMaterials
+            ...(app.materialsOpen ? highlights.materialsMaterials : empty),
+            ...(app.animationsOpen ? highlights.animationMaterials : empty)
         ]);
         redraw = true;
     }
+    app.$watch(() => [app.inspectorOpen, app.materialsOpen, app.animationsOpen].join(), refreshHighlights);
 
     // Inspector: the selected node (and its subtree) is tinted in the view. While the tab is
     // open, clicking the model selects the part under the cursor; clicking empty space clears it.
