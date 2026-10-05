@@ -80,6 +80,7 @@ class UIModel {
         this.highlight = app.highlightChanged.pipe();
         this.materialSelection = app.materialSelectionChanged.pipe();
         this.materialView = app.materialViewChanged.pipe();
+        this.materialHidden = app.materialHiddenChanged.pipe();
         this.materialFactor = app.materialFactorChanged.pipe();
         this.materialTextureToggle = app.materialTextureToggled.pipe();
         this.materialReset = app.materialReset.pipe();
@@ -531,7 +532,9 @@ const getInputObservables = (inputElement, app) => {
                 x: clickEvent.pageX,
                 y: clickEvent.pageY,
                 // for adding to a selection in tabs that support several selected items
-                additive: clickEvent.ctrlKey || clickEvent.metaKey || clickEvent.shiftKey
+                additive: clickEvent.ctrlKey || clickEvent.metaKey || clickEvent.shiftKey,
+                // for hiding the clicked part's material in the Materials tab
+                hide: clickEvent.altKey
             };
         })
     );

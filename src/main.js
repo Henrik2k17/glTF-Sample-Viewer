@@ -721,6 +721,7 @@ export default async () => {
         state.selectionPositions[0].y = Math.floor(selection.y * devicePixelRatio);
         state.triggerSelection = true;
         selectionAdditive = selection.additive === true;
+        selectionHide = selection.hide === true;
     });
     listenForRedraw(uiModel.selection);
 
@@ -853,6 +854,8 @@ export default async () => {
 
     // Ctrl/Cmd/Shift held on the last viewport click (see uiModel.selection)
     let selectionAdditive = false;
+    // Alt held on the last viewport click
+    let selectionHide = false;
     state.selectionCallback = (pickingResult) => {
         if (app.animationsOpen && app.msfsAnimationMode) {
             const nodeIndex = pickingResult.node?.gltfObjectIndex;
@@ -887,6 +890,13 @@ export default async () => {
         if (app.materialsOpen) {
             const mesh = state.gltf.meshes[pickingResult.node?.mesh];
             const material = mesh?.primitives[pickingResult.primitiveIndex]?.material;
+            // Alt-click hides the part's material; the selection stays as it is.
+            if (selectionHide) {
+                if (material !== undefined) {
+                    setHiddenMaterials([...app.materialsHidden, material]);
+                }
+                return;
+            }
             // While isolated, a click next to the part should not bring everything back.
             if (material === undefined && app.materialIsolate) {
                 return;
@@ -922,8 +932,16 @@ export default async () => {
         app.materialsList = buildMaterialList(gltf);
         app.materialsFilter = "";
         app.materialEditedCount = 0;
+        setHiddenMaterials([]);
         closeTextureViewer();
         selectMaterial(undefined);
+    }
+
+    function setHiddenMaterials(indices) {
+        app.materialsHidden = [...new Set(indices)];
+        // A new set each time: the renderer rebuilds its draw lists when the reference changes.
+        state.hiddenMaterialIndices = new Set(app.materialsHidden);
+        redraw = true;
     }
 
     function pixelsToDataUrl({ width, height, pixels }) {
@@ -1000,6 +1018,7 @@ export default async () => {
 
     uiModel.materialSelection.subscribe((index) => selectMaterial(index));
     uiModel.materialView.subscribe(() => applyMaterialView());
+    uiModel.materialHidden.subscribe((indices) => setHiddenMaterials(indices));
 
     uiModel.materialFactor.subscribe(({ key, value }) => {
         if (app.materialsSelected === undefined) {

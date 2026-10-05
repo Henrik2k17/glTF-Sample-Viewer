@@ -955,6 +955,25 @@ input:invalid {
     opacity: 0.5;
     font-variant-numeric: tabular-nums;
 }
+.materialVisibility {
+    flex: 0 0 auto;
+    display: flex;
+    padding: 0 2px;
+    opacity: 0.45;
+}
+.materialVisibility:hover {
+    opacity: 1;
+}
+.materialRowHidden .materialVisibility {
+    opacity: 0.9;
+    color: #ff8a1e;
+}
+.materialRowHidden .inspectorName,
+.materialRowHidden .materialIndex,
+.materialRowHidden .materialCount {
+    text-decoration: line-through;
+    opacity: 0.4;
+}
 .materialCount {
     flex: 0 0 auto;
     font-size: 11px;

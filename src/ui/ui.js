@@ -72,6 +72,7 @@ const appCreated = createApp({
             highlightChanged: new Subject(),
             materialSelectionChanged: new Subject(),
             materialViewChanged: new Subject(),
+            materialHiddenChanged: new Subject(),
             materialFactorChanged: new Subject(),
             materialTextureToggled: new Subject(),
             materialReset: new Subject(),
@@ -199,6 +200,8 @@ const appCreated = createApp({
             materialsSelected: undefined,
             materialHighlight: true,
             materialIsolate: false,
+            // material indices whose parts are not drawn (and not pickable)
+            materialsHidden: [],
             materialInfo: [],
             materialTextures: [],
             materialFactors: [],
@@ -752,6 +755,11 @@ const appCreated = createApp({
             this.showTab(InspectorTab);
             this.inspectorSelectionChanged.next(index);
             this.revealInspectorNode(index);
+        },
+        // Shows or hides the parts using a material; main.js applies the new list.
+        setMaterialHidden(index, hidden) {
+            const others = this.materialsHidden.filter((other) => other !== index);
+            this.materialHiddenChanged.next(hidden ? [...others, index] : others);
         },
         revealMaterial(index) {
             this.$nextTick(() => {
