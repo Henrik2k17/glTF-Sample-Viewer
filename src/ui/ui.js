@@ -170,6 +170,8 @@ const appCreated = createApp({
             msfsNightLighting: false,
             showMsfsColliders: true,
             showMsfsLights: true,
+            // performance overlay on the canvas (logic/perf_overlay.js)
+            showPerfOverlay: false,
             // MSFS animation mode: one frame slider per animation instead of auto-play
             msfsAnimationMode: false,
             msfsAnimations: [],

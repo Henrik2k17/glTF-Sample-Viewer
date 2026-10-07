@@ -1018,6 +1018,21 @@ input:invalid {
     flex: none;
 }
 
+.perfOverlay {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 5;
+    padding: 6px 8px;
+    border-radius: 4px;
+    background: rgba(20, 20, 20, 0.75);
+    color: #e6e6e6;
+    font: 12px/1.45 monospace;
+    pointer-events: none;
+    white-space: nowrap;
+    b { color: #87c540; font-weight: normal; }
+}
+
 .materialListOptions {
     display: flex;
     align-items: center;

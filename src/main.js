@@ -20,6 +20,7 @@ import {
 import { buildMsfsAnimationEntries, findAnimationsForNode, getAnimatedTargets } from "./logic/msfs_animations.js";
 import { summarizeValidation } from "./logic/validation_summary.js";
 import { TextureFolders } from "./logic/texture_folders.js";
+import { PerfOverlay } from "./logic/perf_overlay.js";
 import {
     PackageFiles,
     assemblePreset,
@@ -1590,6 +1591,17 @@ export default async () => {
         return advanced;
     };
 
+    // Performance overlay (Advanced Controls, or ?perf=1 in the URL)
+    const perfOverlay = new PerfOverlay(document.getElementById("canvasUI"));
+    app.$watch("showPerfOverlay", (visible) => {
+        view.profiler.enabled = visible;
+        perfOverlay.setVisible(visible);
+        redraw = true;
+    });
+    if (new URLSearchParams(window.location.search).get("perf") === "1") {
+        app.showPerfOverlay = true;
+    }
+
     // configure the animation loop
     const past = {};
     const update = () => {
@@ -1629,7 +1641,9 @@ export default async () => {
         if (redraw) {
             redraw = false;
             view.renderFrame(state, canvas.width, canvas.height);
+            perfOverlay.recordFrame(view.profiler, performance.now());
         }
+        perfOverlay.update(performance.now(), view.profiler, state, view.renderer, canvas);
 
         window.requestAnimationFrame(update);
     };

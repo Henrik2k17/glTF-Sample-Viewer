@@ -1176,6 +1176,9 @@
                                     <b-switch v-model="showMsfsColliders" v-on:input="showMsfsCollidersChanged.next($event.target.checked)">Show Collision Gizmos</b-switch>
                                     <b-switch v-model="showMsfsLights" v-on:input="showMsfsLightsChanged.next($event.target.checked)">Show Lights</b-switch>
                                 </b-field>
+                                <b-field label="Debug" class="subtitle">
+                                    <b-switch v-model="showPerfOverlay" title="Frame time, draw calls, triangles and texture memory (also ?perf=1 in the URL)">Performance overlay</b-switch>
+                                </b-field>
                                 <b-field label="Current Camera Values" class="subtitle">
                                     <button v-on:click="cameraExport.next($event.target.value)" type="button" class="button is-rounded"><i
                                             class="fa fa-download downloadIcon"></i>Download as .gltf</button>
