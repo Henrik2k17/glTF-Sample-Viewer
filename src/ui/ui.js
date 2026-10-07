@@ -197,6 +197,11 @@ const appCreated = createApp({
             // Materials tab (logic/materials.js): list, selected material's textures and factors
             materialsList: [],
             materialsFilter: "",
+            // indices of materials drawn by parts that are not hidden (node visibility)
+            materialsShown: [],
+            materialsVisibleOnly: true,
+            // MSFS packages: collapsed material groups (by sub model)
+            materialsCollapsed: {},
             materialsSelected: undefined,
             materialHighlight: true,
             materialIsolate: false,
@@ -226,6 +231,23 @@ const appCreated = createApp({
             // Texture lookup folders (logic/texture_folders.js rows)
             textureFoldersSupported: true,
             textureFolders: [],
+            // Models tab mode: "single" glTF or a whole MSFS "package" (logic/msfs_package.js)
+            loadMode: "single",
+            loadModeChanged: new Subject(),
+            packageUrl: "",
+            packageOpenUrl: new Subject(),
+            packageOpenFolder: new Subject(),
+            packagePresetChanged: new Subject(),
+            packageAttachmentToggled: new Subject(),
+            packageAttachmentSelected: new Subject(),
+            packageSource: "",
+            packageStatus: "",
+            packageError: "",
+            packagePresets: [],
+            selectedPackagePreset: "",
+            // rows: { id, depth, name, kind, visible, problems, title, hasChildren }
+            packageRows: [],
+            packageCollapsed: {},
             morphing: true,
             interactivity: true,
             clearcoatEnabled: true,
@@ -373,6 +395,37 @@ const appCreated = createApp({
         });
     },
     computed: {
+        packagePresetGroups() {
+            const groups = [];
+            for (const preset of this.packagePresets) {
+                let group = groups.find((entry) => entry.name === preset.group);
+                if (group === undefined) {
+                    group = { name: preset.group, presets: [] };
+                    groups.push(group);
+                }
+                group.presets.push(preset);
+            }
+            return groups;
+        },
+        // rows whose ancestors are all expanded
+        visiblePackageRows() {
+            const rows = [];
+            let hiddenBelow = Infinity;
+            for (const row of this.packageRows) {
+                if (row.depth > hiddenBelow) {
+                    continue;
+                }
+                hiddenBelow = Infinity;
+                rows.push(row);
+                if (row.hasChildren && this.packageCollapsed[row.id]) {
+                    hiddenBelow = row.depth;
+                }
+            }
+            return rows;
+        },
+        packageProblemCount() {
+            return this.packageRows.filter((row) => row.problems.length > 0).length;
+        },
         textureFoldersNeedAccess() {
             return this.textureFolders.some((folder) => folder.status === "needsAccess");
         },
@@ -387,10 +440,39 @@ const appCreated = createApp({
         },
         visibleMaterials() {
             const filter = this.materialsFilter.trim().toLowerCase();
-            if (filter === "") {
-                return this.materialsList;
+            const shown = this.materialsVisibleOnly ? new Set(this.materialsShown) : undefined;
+            return this.materialsList.filter(
+                (row) =>
+                    (shown === undefined || shown.has(row.index)) &&
+                    (filter === "" || row.search.includes(filter) || String(row.index) === filter)
+            );
+        },
+        // The list as displayed: material rows, under group headers when rows have a group
+        materialDisplayRows() {
+            const rows = this.visibleMaterials;
+            if (!rows.some((row) => row.group !== undefined)) {
+                return rows.map((row) => ({ type: "material", key: `m${row.index}`, row }));
             }
-            return this.materialsList.filter((row) => row.search.includes(filter) || String(row.index) === filter);
+            const groups = new Map();
+            for (const row of rows) {
+                const group = row.group ?? { key: "other", label: "Other", order: Infinity };
+                if (!groups.has(group.key)) {
+                    groups.set(group.key, { ...group, rows: [] });
+                }
+                groups.get(group.key).rows.push(row);
+            }
+            const display = [];
+            for (const group of [...groups.values()].sort((a, b) => a.order - b.order)) {
+                const collapsed = this.materialsCollapsed[group.key] && this.materialsFilter.trim() === "";
+                display.push({ type: "group", key: `g${group.key}`, group, count: group.rows.length, collapsed });
+                if (!collapsed) {
+                    display.push(...group.rows.map((row) => ({ type: "material", key: `m${row.index}`, row })));
+                }
+            }
+            return display;
+        },
+        materialGroupCount() {
+            return this.materialDisplayRows.filter((entry) => entry.type === "group").length;
         },
         inspectorSelectedRow() {
             return this.inspectorNodes.find((row) => row.index === this.inspectorSelected);
@@ -762,6 +844,10 @@ const appCreated = createApp({
             this.materialHiddenChanged.next(hidden ? [...others, index] : others);
         },
         revealMaterial(index) {
+            const group = this.materialsList.find((row) => row.index === index)?.group;
+            if (group !== undefined && this.materialsCollapsed[group.key]) {
+                this.materialsCollapsed = { ...this.materialsCollapsed, [group.key]: false };
+            }
             this.$nextTick(() => {
                 document.getElementById(`materialRow${index}`)?.scrollIntoView({ block: "nearest" });
             });
@@ -775,6 +861,30 @@ const appCreated = createApp({
             this.$nextTick(() => {
                 document.getElementById(`inspectorRow${index}`)?.scrollIntoView({ block: "nearest" });
             });
+        },
+        toggleMaterialGroup(key) {
+            this.materialsCollapsed = { ...this.materialsCollapsed, [key]: !this.materialsCollapsed[key] };
+        },
+        setMaterialGroupsCollapsed(collapsed) {
+            const state = {};
+            for (const row of this.materialsList) {
+                if (row.group !== undefined) {
+                    state[row.group.key] = collapsed;
+                }
+            }
+            this.materialsCollapsed = state;
+        },
+        togglePackageCollapsed(id) {
+            this.packageCollapsed = { ...this.packageCollapsed, [id]: !this.packageCollapsed[id] };
+        },
+        setPackageCollapsedAll(collapsed) {
+            const state = {};
+            for (const row of this.packageRows) {
+                if (row.hasChildren) {
+                    state[row.id] = collapsed;
+                }
+            }
+            this.packageCollapsed = state;
         },
         warn(message) {
             this.$buefy.toast.open({

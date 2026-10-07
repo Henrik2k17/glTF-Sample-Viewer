@@ -1,7 +1,8 @@
-import { Observable, merge, fromEvent } from "rxjs";
+import { Observable, Subject, merge, fromEvent } from "rxjs";
 import {
     map,
     filter,
+    tap,
     startWith,
     pluck,
     takeUntil,
@@ -137,7 +138,8 @@ class UIModel {
         const inputObservables = getInputObservables(canvas, this.app);
 
         const dropdownGltfChanged = app.modelChanged.pipe(
-            startWith(modelURL === null ? "DamagedHelmet" : null),
+            // no default model when a model or MSFS package is given in the URL
+            startWith(modelURL === null && urlParams.get("package") === null ? "DamagedHelmet" : null),
             filter((value) => value !== null),
             map((value) => {
                 app.flavours = modelPathProvider.getModelFlavours(value);
@@ -251,6 +253,14 @@ class UIModel {
             );
             this.model = merge(this.model, loadFromUrlObservable);
         }
+
+        // MSFS packages: main.js assembles a preset into one glTF and passes it here
+        this.packageModels = new Subject();
+        this.droppedPackage = inputObservables.droppedPackage;
+        this.model = merge(
+            this.model,
+            this.packageModels.pipe(tap((model) => (lastModel = model)))
+        );
 
         const reloadedModel = app.modelReloadRequested.pipe(
             filter(() => lastModel !== undefined),
@@ -465,8 +475,12 @@ const getInputObservables = (inputElement, app) => {
         });
     }).pipe(share());
 
+    // In MSFS package mode a dropped folder is a package (see main.js), not a single model.
+    observables.droppedPackage = droppedFiles.pipe(filter(() => app.loadMode === "package"));
+
     // Partition files into a .gltf or .glb and additional files like buffers and textures
     observables.droppedGltf = droppedFiles.pipe(
+        filter(() => app.loadMode !== "package"),
         map((files) => {
             files = files.map((file) => {
                 let filePath = file[0].replaceAll("\\", "/");

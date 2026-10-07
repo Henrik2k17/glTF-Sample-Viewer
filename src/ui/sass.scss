@@ -910,6 +910,143 @@ input:invalid {
     color: #1e1e1e;
 }
 
+.loadModeSwitch {
+    display: flex;
+    margin-bottom: 1em;
+    .button {
+        flex: 1;
+        background: transparent;
+        border: 1px solid #5a5a5a;
+        color: inherit;
+        border-radius: 0;
+        &:first-child { border-radius: 4px 0 0 4px; }
+        &:last-child { border-radius: 0 4px 4px 0; border-left: none; }
+        &.is-selected {
+            background: #87c540;
+            border-color: #87c540;
+            color: #1e1e1e;
+        }
+    }
+}
+.msfsPackage {
+    margin-bottom: 1em;
+    .label { margin-bottom: 0.25em; }
+}
+.packageInfo,
+.packageStatus {
+    font-size: 13px;
+    opacity: 0.7;
+    margin-bottom: 0.5em;
+}
+.packageError {
+    font-size: 13px;
+    color: #ffb33f;
+    margin-bottom: 0.5em;
+}
+.packageSourceRow {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    margin-bottom: 0.5em;
+    .input { flex: 1; min-width: 0; }
+}
+.packageSourceName {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    opacity: 0.75;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.packageTreeToolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.25em;
+    margin-top: 0.75em;
+    .label { flex: 1; margin-bottom: 0; }
+    .button.is-text { color: inherit; opacity: 0.75; text-decoration: none; height: auto; padding: 0 0.4em; }
+}
+.packageProblems {
+    color: #ffb33f;
+    font-size: 12px;
+}
+.packageTree {
+    margin-top: 0.25em;
+    font-size: 13px;
+}
+.packageRow {
+    display: flex;
+    align-items: center;
+    gap: 0.35em;
+    padding-top: 2px;
+    padding-bottom: 2px;
+    white-space: nowrap;
+    &:hover { background: #2f2f2f; }
+    input[type="checkbox"] { margin: 0; flex: none; }
+}
+.packageRowHidden .packageName,
+.packageRowExternal .packageName { opacity: 0.45; }
+.packageRowExternal .packageName { font-style: italic; }
+.packageTwisty {
+    width: 12px;
+    flex: none;
+    cursor: pointer;
+    font-size: 11px;
+    opacity: 0.75;
+}
+.packageKind {
+    flex: none;
+    font-size: 10px;
+    padding: 0 4px;
+    border-radius: 3px;
+    border: 1px solid #5a5a5a;
+    opacity: 0.8;
+}
+.packageKind-model { border-color: #87c540; }
+.packageKind-merge { border-color: #4f8fd6; }
+.packageName {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    &:hover { text-decoration: underline; }
+}
+.packageWarn {
+    color: #ffb33f;
+    flex: none;
+}
+
+.materialListOptions {
+    display: flex;
+    align-items: center;
+    gap: 0.25em;
+    font-size: 13px;
+    margin: 0.25em 0 0.5em;
+    .checkbox { flex: 1; }
+    .button.is-text { color: inherit; opacity: 0.75; text-decoration: none; height: auto; padding: 0 0.4em; }
+}
+.materialGroup {
+    display: flex;
+    align-items: center;
+    gap: 0.35em;
+    padding: 4px 4px 2px;
+    margin-top: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 1px solid #3a3a3a;
+    &:hover { background: #2f2f2f; }
+}
+.materialGroupName {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .inspectorSummary {
     margin: 0.5em 0 0.75em 0;
     font-size: 13px;

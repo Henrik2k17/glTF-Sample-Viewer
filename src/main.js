@@ -11,6 +11,7 @@ import {
 } from "./logic/inspector.js";
 import {
     buildMaterialList,
+    getShownMaterials,
     getChannelHints,
     getMaterialTextureSlots,
     getMaterialUsage,
@@ -19,8 +20,17 @@ import {
 import { buildMsfsAnimationEntries, findAnimationsForNode, getAnimatedTargets } from "./logic/msfs_animations.js";
 import { summarizeValidation } from "./logic/validation_summary.js";
 import { TextureFolders } from "./logic/texture_folders.js";
+import {
+    PackageFiles,
+    assemblePreset,
+    buildPresetTree,
+    findPresets,
+    flattenTree,
+    releaseVirtualFiles,
+    scanDirectory
+} from "./logic/msfs_package.js";
 import { app } from "./ui/ui.js";
-import { EMPTY, Observable, from, merge } from "rxjs";
+import { EMPTY, Observable, from, merge, of } from "rxjs";
 import { mergeMap, map, share, catchError, switchMap, tap } from "rxjs/operators";
 import { GltfModelPathProvider, fillEnvironmentWithPaths } from "./model_path_provider.js";
 
@@ -46,6 +56,16 @@ export default async () => {
         return textureFolders.resolve(uri);
     };
     const state = view.createState();
+
+    // The loaded MSFS package preset (see "MSFS packages" below); the Materials tab uses it too.
+    const msfsPackage = {
+        packages: [],
+        presets: [],
+        items: [], // tree of the loaded preset
+        byId: new Map(),
+        objectUrl: undefined,
+        loading: 0 // generation, to drop results of superseded loads
+    };
 
     await state.physicsController.initializeEngine("NvidiaPhysX");
 
@@ -98,6 +118,13 @@ export default async () => {
     const validation = uiModel.model.pipe(
         switchMap((model) => {
             validatorWorker?.terminate();
+            validatorWorker = undefined;
+            if (model.package) {
+                // The merged glTF only exists in memory; the validator checks files.
+                return of({
+                    error: "The validator checks single glTF files. Load a part in Single file mode to validate it."
+                });
+            }
             const worker = new Worker("./validator.worker.js");
             validatorWorker = worker;
             return new Observable((subscriber) => {
@@ -214,6 +241,7 @@ export default async () => {
                         setupInspector(gltf, state.sceneIndex);
                         setupMaterials(gltf);
                         refreshValidationSummary();
+                        setupPackageTree(model);
 
                         uiModel.exitLoadingState();
 
@@ -227,6 +255,10 @@ export default async () => {
                         setupInspector(emptyGltf, 0);
                         setupMaterials(emptyGltf);
                         refreshValidationSummary();
+                        setupPackageTree(undefined);
+                        if (model.package) {
+                            app.packageError = `Loading the assembled model failed: ${error}`;
+                        }
                         uiModel.exitLoadingState();
                         redraw = true;
                         return state;
@@ -760,6 +792,246 @@ export default async () => {
     uiModel.textureFolderMove.subscribe(({ id, offset }) => textureFolders.move(id, offset));
     uiModel.textureFolderRescan.subscribe((id) => textureFolders.rescan(id));
 
+    // MSFS packages (Models tab, package mode): a preset's attachments are merged into one glTF
+    // (logic/msfs_package.js) and loaded like any other model. State: msfsPackage (top).
+    app.loadModeChanged.subscribe((mode) => (app.loadMode = mode));
+
+    async function openPackages(load, sourceLabel) {
+        const generation = ++msfsPackage.loading;
+        app.packageError = "";
+        app.packageStatus = "Opening package…";
+        app.packageSource = sourceLabel;
+        app.packagePresets = [];
+        try {
+            const packages = await load();
+            if (generation !== msfsPackage.loading) {
+                return;
+            }
+            app.packageStatus = "Looking for presets…";
+            const presets = await findPresets(packages);
+            if (generation !== msfsPackage.loading) {
+                return;
+            }
+            msfsPackage.packages = packages;
+            msfsPackage.presets = presets;
+            app.packagePresets = presets.map(({ id, title, group }) => ({ id, title, group }));
+            app.packageStatus = "";
+            if (presets.length === 0) {
+                const fileCount = packages.reduce((sum, files) => sum + files.paths.size, 0);
+                console.info(
+                    "MSFS package: no presets in",
+                    packages.map((files) => `${files.label}: ${files.paths.size} files`),
+                    msfsPackage.scannedFiles?.slice(0, 20)
+                );
+                if (msfsPackage.cfgBlocked) {
+                    app.packageError =
+                        `The browser doesn't let the viewer read the .cfg files in ${sourceLabel} (picked folders hide them). ` +
+                        "Drop the folder onto the view instead, or open the package by URL.";
+                    return;
+                }
+                app.packageError =
+                    `No presets found in ${sourceLabel} (${msfsPackage.scannedCount ?? fileCount} files read, ` +
+                    `${packages.length} package${packages.length === 1 ? "" : "s"} recognized). ` +
+                    "Open a package (the folder with SimObjects), a SimObject folder or a project folder; " +
+                    "presets are SimObjects/<category>/<name>/presets/<author>/<preset>/config/attached_objects.cfg.";
+                return;
+            }
+            const wanted = (new URLSearchParams(window.location.search).get("preset") ?? "").toLowerCase();
+            const preset =
+                presets.find((entry) => wanted !== "" && (entry.name.toLowerCase() === wanted || entry.title.toLowerCase() === wanted)) ??
+                presets[0];
+            app.selectedPackagePreset = preset.id;
+            await loadPreset(preset.id);
+        } catch (error) {
+            console.error("Opening the package failed", error);
+            app.packageStatus = "";
+            app.packageError = error?.message ?? String(error);
+        }
+    }
+
+    async function loadPreset(id) {
+        const preset = msfsPackage.presets.find((entry) => entry.id === id);
+        if (preset === undefined) {
+            return;
+        }
+        const generation = ++msfsPackage.loading;
+        app.packageError = "";
+        app.packageStatus = `Reading the configuration of ${preset.title}…`;
+        uiModel.goToLoadingState();
+        try {
+            const items = await buildPresetTree(preset);
+            const json = await assemblePreset(preset, items, (done, total) => {
+                app.packageStatus = `Reading models ${done} / ${total}…`;
+            });
+            if (generation !== msfsPackage.loading) {
+                return;
+            }
+            msfsPackage.items = items;
+            msfsPackage.byId = new Map(flattenTree(items).map(({ item }) => [item.id, item]));
+            if (json.meshes === undefined) {
+                // e.g. an SDK project's PackageSources: configs only, the models are elsewhere
+                const hasModels = preset.files.list().some((path) => /\.gltf$/i.test(path));
+                app.packageError = hasModels
+                    ? "None of this preset's models were found (hover the ⚠ entries for details)."
+                    : `${preset.files.label} has the configuration but no models (.gltf / .xml). ` +
+                      "Open the built package instead (Packages\\<package name>, the folder with layout.json).";
+            }
+            if (msfsPackage.objectUrl !== undefined) {
+                URL.revokeObjectURL(msfsPackage.objectUrl);
+            }
+            msfsPackage.objectUrl = URL.createObjectURL(
+                new Blob([JSON.stringify(json)], { type: "model/gltf+json" })
+            );
+            app.packageStatus = "Loading textures and geometry…";
+            uiModel.packageModels.next({ mainFile: msfsPackage.objectUrl, package: true, presetId: id });
+        } catch (error) {
+            console.error("Assembling the preset failed", error);
+            app.packageStatus = "";
+            app.packageError = error?.message ?? String(error);
+            uiModel.exitLoadingState();
+        }
+    }
+
+    function setupPackageTree(model) {
+        if (!model?.package) {
+            app.packageRows = [];
+            return;
+        }
+        app.packageStatus = "";
+        const kindLabels = { model: "model", merge: "merge", attachment: "part" };
+        msfsPackage.parents = new Map();
+        state.gltf.nodes.forEach((node, index) =>
+            node.children.forEach((child) => msfsPackage.parents.set(child, index))
+        );
+        app.packageRows = flattenTree(msfsPackage.items).map(({ item, depth }) => {
+            const lines = [
+                item.note,
+                item.path,
+                item.node !== undefined ? `Attached to node ${item.node} (${item.model})` : `In the ${item.model} model`,
+                item.inherits ? `Inherits ${item.inherits}` : undefined,
+                item.texture ? `Texture variant: texture.${item.texture}` : undefined,
+                item.tags?.length ? `Tags: ${item.tags.join(", ")}` : undefined,
+                ...item.gltfs.map((gltf) => `glTF: ${gltf}`),
+                ...item.problems.map((problem) => `⚠ ${problem}`)
+            ];
+            return {
+                id: item.id,
+                depth,
+                name: item.name,
+                kind: item.external ? "external" : item.kind,
+                kindLabel: item.external ? "sim" : kindLabels[item.kind],
+                visible: true,
+                shown: true,
+                problems: item.problems,
+                hasChildren: item.children.length > 0,
+                title: lines.filter((line) => line).join("\n")
+            };
+        });
+        app.packageCollapsed = {};
+        const problems = app.packageRows.filter((row) => row.problems.length > 0).length;
+        if (problems > 0) {
+            app.packageStatus = `${problems} entries have problems (⚠, hover for details).`;
+        }
+    }
+
+    // Hiding an entry hides everything configured below it too.
+    app.packageAttachmentToggled.subscribe(({ id, visible }) => {
+        const item = msfsPackage.byId.get(id);
+        if (item === undefined || state.gltf === undefined) {
+            return;
+        }
+        const ids = new Set(flattenTree([item]).map(({ item: entry }) => entry.id));
+        for (const entry of flattenTree([item]).map((row) => row.item)) {
+            const extension = state.gltf.nodes[entry.wrapperNode]?.extensions?.KHR_node_visibility;
+            if (extension !== undefined) {
+                extension.visible = visible;
+            }
+        }
+        // shown: not hidden by any node above it (attachments sit on nodes of other entries)
+        const isShown = (nodeIndex) => {
+            for (let node = nodeIndex; node !== undefined; node = msfsPackage.parents.get(node)) {
+                if (state.gltf.nodes[node]?.extensions?.KHR_node_visibility?.visible === false) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        app.packageRows = app.packageRows.map((row) => {
+            const entry = msfsPackage.byId.get(row.id);
+            return {
+                ...row,
+                visible: ids.has(row.id) ? visible : row.visible,
+                shown: isShown(entry.wrapperNode)
+            };
+        });
+        refreshShownMaterials();
+        if (!state.renderingParameters.enabledExtensions.KHR_node_visibility) {
+            app.warn("Enable KHR_node_visibility (Advanced Controls) to hide attachments.");
+        }
+        redraw = true;
+    });
+    app.packageAttachmentSelected.subscribe((id) => {
+        const item = msfsPackage.byId.get(id);
+        if (item?.wrapperNode !== undefined && state.gltf?.nodes[item.wrapperNode] !== undefined) {
+            app.showInspectorNode(item.wrapperNode);
+        }
+    });
+    app.packagePresetChanged.subscribe((id) => loadPreset(id));
+    app.packageOpenUrl.subscribe((url) => {
+        url = url.trim();
+        if (url !== "") {
+            msfsPackage.scannedCount = undefined;
+            msfsPackage.scannedFiles = undefined;
+            releaseVirtualFiles();
+            openPackages(() => PackageFiles.fromUrl(url), url);
+        }
+    });
+    // The folder picker needs the click's user activation: no await before it.
+    app.packageOpenFolder.subscribe(() => {
+        const picked = window.showDirectoryPicker({ id: "msfsPackage", mode: "read" });
+        picked.then(
+            (handle) => {
+                releaseVirtualFiles();
+                openPackages(async () => {
+                    const entries = await scanDirectory(handle, (count) => {
+                        app.packageStatus = `Listing files… ${count}`;
+                    });
+                    msfsPackage.scannedCount = entries.length;
+                    msfsPackage.scannedFiles = entries.map(([path]) => path);
+                    msfsPackage.cfgBlocked = entries.cfgHidden && entries.cfgProbed === 0;
+                    if (entries.failedFolders.length > 0) {
+                        app.warn(
+                            `${entries.failedFolders.length} folders could not be read: ${entries.failedFolders.slice(0, 3).join("; ")}`
+                        );
+                    }
+                    return PackageFiles.fromFiles(entries, handle.name);
+                }, handle.name);
+            },
+            (error) => {
+                if (error?.name !== "AbortError") {
+                    app.packageError = `The folder could not be opened: ${error?.message ?? error}`;
+                }
+            }
+        );
+    });
+    uiModel.droppedPackage.subscribe((files) => {
+        const entries = files.map(([path, file]) => [path.replaceAll("\\", "/").replace(/^\//, ""), file]);
+        const top = entries[0]?.[0].split("/")[0] ?? "dropped files";
+        msfsPackage.scannedCount = entries.length;
+        msfsPackage.scannedFiles = entries.map(([path]) => path);
+        msfsPackage.cfgBlocked = false;
+        releaseVirtualFiles();
+        openPackages(async () => PackageFiles.fromFiles(entries, top), top);
+    });
+    {
+        const packageParam = new URLSearchParams(window.location.search).get("package");
+        if (packageParam !== null) {
+            app.loadMode = "package";
+            app.packageUrl = packageParam;
+            openPackages(() => PackageFiles.fromUrl(packageParam), packageParam);
+        }
+    }
+
     // Tinted nodes and materials come from several tabs; only the open tab's tint is shown.
     // Selections are kept, so the tint comes back when the tab is opened again.
     const highlights = {
@@ -935,12 +1207,33 @@ export default async () => {
         materialEdits.clear();
         thumbnails = new Map();
         materialUsage = getMaterialUsage(gltf);
-        app.materialsList = buildMaterialList(gltf);
+        // MSFS packages: group by the entry (sub model) a material comes from, in tree order
+        const order = new Map(flattenTree(msfsPackage.items).map(({ item }, index) => [item.id, index]));
+        const groupOf = (material) => {
+            const item = msfsPackage.byId.get(material.extras?.msfsPackageItem);
+            if (item === undefined) {
+                return undefined;
+            }
+            const names = [];
+            for (let entry = item; entry !== undefined; entry = entry.parent) {
+                // attachments are often named like the models (e.g. a cabin called "Interior")
+                names.unshift(entry.kind === "model" ? `${entry.name} (model)` : entry.name);
+            }
+            return { key: item.id, label: names.join(" › "), order: order.get(item.id) ?? 0 };
+        };
+        app.materialsList = buildMaterialList(gltf, groupOf);
+        app.materialsCollapsed = {};
+        refreshShownMaterials();
         app.materialsFilter = "";
         app.materialEditedCount = 0;
         setHiddenMaterials([]);
         closeTextureViewer();
         selectMaterial(undefined);
+    }
+
+    /** Materials of the parts not hidden with KHR_node_visibility (MSFS package toggles). */
+    function refreshShownMaterials() {
+        app.materialsShown = state.gltf === undefined ? [] : [...getShownMaterials(state.gltf, state.sceneIndex ?? 0)];
     }
 
     function setHiddenMaterials(indices) {

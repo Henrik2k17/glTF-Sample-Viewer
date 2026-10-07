@@ -232,8 +232,34 @@ function getMaterialUsage(gltf) {
     return usage;
 }
 
-/** Rows for the material list: [{index, name, badges, missing, nodeCount, textureCount}] */
-function buildMaterialList(gltf) {
+/**
+ * Indices of the materials drawn by nodes that are not hidden with KHR_node_visibility
+ * (themselves or by an ancestor).
+ */
+function getShownMaterials(gltf, sceneIndex) {
+    const shown = new Set();
+    const visit = (nodeIndex) => {
+        const node = gltf.nodes[nodeIndex];
+        if (node === undefined || node.extensions?.KHR_node_visibility?.visible === false) {
+            return;
+        }
+        for (const primitive of gltf.meshes[node.mesh]?.primitives ?? []) {
+            if (primitive.material !== undefined) {
+                shown.add(primitive.material);
+            }
+        }
+        node.children.forEach(visit);
+    };
+    (gltf.scenes[sceneIndex]?.nodes ?? []).forEach(visit);
+    return shown;
+}
+
+/**
+ * Rows for the material list: [{index, name, badges, missing, nodeCount, textureCount, group}]
+ * @param {(material) => {key, label, order} | undefined} [groupOf] optional grouping (MSFS
+ *   packages: the attachment a material comes from)
+ */
+function buildMaterialList(gltf, groupOf) {
     const usage = getMaterialUsage(gltf);
     // The renderer appends a default material for primitives without one; list it only if used.
     const defaultIndex = gltf.materials.length - 1;
@@ -265,7 +291,8 @@ function buildMaterialList(gltf) {
                 badges,
                 textureCount: slots.length,
                 missing: slots.filter((slot) => slot.status === "missing").length,
-                nodeCount: usage.get(index)?.size ?? 0
+                nodeCount: usage.get(index)?.size ?? 0,
+                group: groupOf?.(material)
             };
         });
 }
@@ -445,6 +472,7 @@ class MaterialEdits {
 
 export {
     buildMaterialList,
+    getShownMaterials,
     getChannelHints,
     getMaterialTextureSlots,
     getMaterialUsage,

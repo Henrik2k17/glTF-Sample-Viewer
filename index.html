@@ -154,6 +154,13 @@
                                 <img src="assets/ui/Navigation_right_20px.svg" class="tabNavigationIcon" width="30px"
                                     @click="collapseActiveTab($event, 0)">
                                 <h2 class="title is-spaced">Models</h2>
+                                <div class="loadModeSwitch">
+                                    <button class="button is-small" v-bind:class="{ 'is-selected': loadMode === 'single' }"
+                                        v-on:click="loadModeChanged.next('single')">Single file</button>
+                                    <button class="button is-small" v-bind:class="{ 'is-selected': loadMode === 'package' }"
+                                        v-on:click="loadModeChanged.next('package')">MSFS package</button>
+                                </div>
+                                <template v-if="loadMode === 'single'">
                                 <b-field label="Models" class="subtitle">
                                     <b-select v-model="selectedModel" v-on:input="modelChanged.next($event.target.value);">
                                         <option v-for="(item) in models" v-bind:value="item">
@@ -168,6 +175,60 @@
                                         </option>
                                     </b-select>
                                 </b-field>
+                                </template>
+
+                                <!-- MSFS package: a SimObject assembled from a preset's attachments -->
+                                <div class="msfsPackage" v-if="loadMode === 'package'">
+                                    <p class="packageInfo">
+                                        Loads all models of a preset and places them on their attach nodes (LOD 0).
+                                        Open a built package by URL (the folder with layout.json), pick a folder, or drop a package folder onto the view.
+                                    </p>
+                                    <div class="packageSourceRow">
+                                        <input class="input is-small" type="text" placeholder="http://…/Packages/my-package/" v-model="packageUrl"
+                                            v-on:keyup.enter="packageOpenUrl.next(packageUrl)">
+                                        <button class="button is-small is-rounded is-outlined" v-bind:disabled="packageUrl.trim() === ''"
+                                            v-on:click="packageOpenUrl.next(packageUrl)">Open</button>
+                                    </div>
+                                    <div class="packageSourceRow">
+                                        <button class="button is-small is-rounded is-outlined" v-if="textureFoldersSupported"
+                                            v-on:click="packageOpenFolder.next(undefined)">Open folder…</button>
+                                        <span class="packageSourceName" v-if="packageSource" v-bind:title="packageSource">{{ packageSource }}</span>
+                                    </div>
+                                    <p class="packageError" v-if="packageError">{{ packageError }}</p>
+                                    <b-field label="Preset" v-if="packagePresets.length > 0">
+                                        <b-select v-model="selectedPackagePreset" expanded
+                                            v-on:input="packagePresetChanged.next($event.target.value)">
+                                            <optgroup v-for="group in packagePresetGroups" v-bind:key="group.name" v-bind:label="group.name">
+                                                <option v-for="preset in group.presets" v-bind:key="preset.id" v-bind:value="preset.id">
+                                                    {{ preset.title }}
+                                                </option>
+                                            </optgroup>
+                                        </b-select>
+                                    </b-field>
+                                    <p class="packageStatus" v-if="packageStatus">{{ packageStatus }}</p>
+                                    <template v-if="packageRows.length > 0">
+                                        <div class="packageTreeToolbar">
+                                            <label class="label">Attachments</label>
+                                            <span class="packageProblems" v-if="packageProblemCount > 0">&#9888; {{ packageProblemCount }}</span>
+                                            <button class="button is-small is-text" v-on:click="setPackageCollapsedAll(false)">Expand</button>
+                                            <button class="button is-small is-text" v-on:click="setPackageCollapsedAll(true)">Collapse</button>
+                                        </div>
+                                        <div class="packageTree">
+                                            <div v-for="row in visiblePackageRows" v-bind:key="row.id" class="packageRow"
+                                                v-bind:class="{ 'packageRowHidden': !row.shown, 'packageRowExternal': row.kind === 'external', 'packageRowProblem': row.problems.length > 0 }"
+                                                v-bind:style="{ paddingLeft: (row.depth * 14 + 4) + 'px' }" v-bind:title="row.title">
+                                                <span class="packageTwisty" v-on:click="togglePackageCollapsed(row.id)">
+                                                    <template v-if="row.hasChildren">{{ packageCollapsed[row.id] ? '&#9656;' : '&#9662;' }}</template>
+                                                </span>
+                                                <input type="checkbox" v-bind:checked="row.visible" v-bind:aria-label="'Show ' + row.name"
+                                                    v-on:change="packageAttachmentToggled.next({ id: row.id, visible: $event.target.checked })">
+                                                <span class="packageKind" v-bind:class="'packageKind-' + row.kind">{{ row.kindLabel }}</span>
+                                                <span class="packageName" v-on:click="packageAttachmentSelected.next(row.id)">{{ row.name }}</span>
+                                                <span class="packageWarn" v-if="row.problems.length > 0">&#9888;</span>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
                                 <b-field label="Scenes" class="subtitle">
                                     <b-select v-model="selectedScene" v-on:input="sceneChanged.next($event.target.value)">
                                         <option v-for="(item) in scenes" v-bind:value="item.index">
@@ -818,30 +879,47 @@
                                 <img src="assets/ui/Navigation_right_20px.svg" class="tabNavigationIcon" width="30px"
                                     @click="collapseActiveTab($event, 8)">
                                 <h2 class="title is-spaced" style="margin-bottom: 0.5em;">Materials</h2>
-                                <p class="inspectorInfo">{{ materialsList.length }} materials &middot; click a part in the view to select its material, Alt+click to hide it</p>
+                                <p class="inspectorInfo">{{ visibleMaterials.length }} of {{ materialsList.length }} materials &middot; click a part in the view to select its material, Alt+click to hide it</p>
                                 <div class="inspectorToolbar">
                                     <input class="input is-small" type="search" placeholder="Filter by name, type or texture file" v-model="materialsFilter">
                                     <button v-if="materialsHidden.length > 0" class="button is-small is-rounded is-outlined"
                                         title="Show the parts of all hidden materials again"
                                         v-on:click="materialHiddenChanged.next([])">Show all ({{ materialsHidden.length }})</button>
                                 </div>
+                                <div class="materialListOptions">
+                                    <label class="checkbox" title="Only list materials of parts that are shown (hidden attachments and nodes are left out; materials hidden here stay listed)">
+                                        <input type="checkbox" v-model="materialsVisibleOnly"> Visible parts only
+                                    </label>
+                                    <template v-if="materialGroupCount > 0">
+                                        <button class="button is-small is-text" v-on:click="setMaterialGroupsCollapsed(false)">Expand</button>
+                                        <button class="button is-small is-text" v-on:click="setMaterialGroupsCollapsed(true)">Collapse</button>
+                                    </template>
+                                </div>
                                 <div class="inspectorTree materialList">
-                                    <div v-for="row in visibleMaterials" v-bind:key="row.index" v-bind:id="'materialRow' + row.index"
-                                        class="inspectorRow" v-bind:class="{ inspectorRowSelected: row.index === materialsSelected, materialRowHidden: materialsHidden.includes(row.index) }"
-                                        v-bind:title="row.code ? row.name + ' (' + row.code + ')' : row.name"
-                                        v-on:click="materialSelectionChanged.next(row.index)">
-                                        <span class="materialVisibility" v-bind:title="materialsHidden.includes(row.index) ? 'Hidden: click to show its parts' : 'Click to hide the parts using this material'"
-                                            v-on:click.stop="setMaterialHidden(row.index, !materialsHidden.includes(row.index))">
-                                            <svg v-if="!materialsHidden.includes(row.index)" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    <template v-for="entry in materialDisplayRows" v-bind:key="entry.key">
+                                    <div v-if="entry.type === 'group'" class="materialGroup" v-bind:title="entry.group.label"
+                                        v-on:click="toggleMaterialGroup(entry.group.key)">
+                                        <span class="packageTwisty">{{ entry.collapsed ? '&#9656;' : '&#9662;' }}</span>
+                                        <span class="materialGroupName">{{ entry.group.label }}</span>
+                                        <span class="materialCount">{{ entry.count }}</span>
+                                    </div>
+                                    <div v-else v-bind:id="'materialRow' + entry.row.index"
+                                        class="inspectorRow" v-bind:class="{ inspectorRowSelected: entry.row.index === materialsSelected, materialRowHidden: materialsHidden.includes(entry.row.index) }"
+                                        v-bind:title="entry.row.code ? entry.row.name + ' (' + entry.row.code + ')' : entry.row.name"
+                                        v-on:click="materialSelectionChanged.next(entry.row.index)">
+                                        <span class="materialVisibility" v-bind:title="materialsHidden.includes(entry.row.index) ? 'Hidden: click to show its parts' : 'Click to hide the parts using this material'"
+                                            v-on:click.stop="setMaterialHidden(entry.row.index, !materialsHidden.includes(entry.row.index))">
+                                            <svg v-if="!materialsHidden.includes(entry.row.index)" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
                                             <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19M1 1l22 22"/></svg>
                                         </span>
-                                        <span class="materialIndex">{{ row.index }}</span>
-                                        <span class="inspectorName">{{ row.name }}</span>
-                                        <span v-if="row.missing > 0" class="inspectorBadge inspectorBadge-tag" title="Textures that could not be loaded">{{ row.missing }} missing</span>
-                                        <span v-for="badge in row.badges" v-bind:key="badge" class="inspectorBadge">{{ badge }}</span>
-                                        <span v-if="row.nodeCount === 0" class="inspectorBadge" title="Not used by any node">unused</span>
-                                        <span class="materialCount" title="Textures">{{ row.textureCount }} tex</span>
+                                        <span class="materialIndex">{{ entry.row.index }}</span>
+                                        <span class="inspectorName">{{ entry.row.name }}</span>
+                                        <span v-if="entry.row.missing > 0" class="inspectorBadge inspectorBadge-tag" title="Textures that could not be loaded">{{ entry.row.missing }} missing</span>
+                                        <span v-for="badge in entry.row.badges" v-bind:key="badge" class="inspectorBadge">{{ badge }}</span>
+                                        <span v-if="entry.row.nodeCount === 0" class="inspectorBadge" title="Not used by any node">unused</span>
+                                        <span class="materialCount" title="Textures">{{ entry.row.textureCount }} tex</span>
                                     </div>
+                                    </template>
                                 </div>
                                 <template v-if="materialsSelectedRow">
                                     <div class="inspectorDetailsHeader">
