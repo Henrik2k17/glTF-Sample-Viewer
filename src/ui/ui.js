@@ -239,7 +239,7 @@ const appCreated = createApp({
             packageUrl: "",
             packageOpenUrl: new Subject(),
             packageOpenFolder: new Subject(),
-            packagePresetChanged: new Subject(),
+            packageLoadPreset: new Subject(),
             packageAttachmentToggled: new Subject(),
             packageAttachmentSelected: new Subject(),
             packageSource: "",
@@ -247,6 +247,7 @@ const appCreated = createApp({
             packageError: "",
             packagePresets: [],
             selectedPackagePreset: "",
+            loadedPackagePreset: "", // preset of the shown model
             // rows: { id, depth, name, kind, visible, problems, title, hasChildren }
             packageRows: [],
             packageCollapsed: {},

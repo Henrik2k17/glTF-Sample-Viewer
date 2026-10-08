@@ -19,7 +19,10 @@ function textureBytes(gltf) {
             continue; // not loaded, or a renderer-internal texture
         }
         if (data.compressed !== undefined) {
-            bytes += data.compressed.levels.reduce((sum, level) => sum + level.data.byteLength, 0);
+            // levels are released once on the GPU (see gltfWebGl.releaseUploadedImage)
+            bytes +=
+                data.compressed.byteLength ??
+                data.compressed.levels.reduce((sum, level) => sum + level.data.byteLength, 0);
         } else if (data.width && data.height) {
             bytes += (data.width * data.height * 4 * 4) / 3;
         }

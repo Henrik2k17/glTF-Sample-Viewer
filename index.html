@@ -196,14 +196,19 @@
                                     </div>
                                     <p class="packageError" v-if="packageError">{{ packageError }}</p>
                                     <b-field label="Preset" v-if="packagePresets.length > 0">
-                                        <b-select v-model="selectedPackagePreset" expanded
-                                            v-on:input="packagePresetChanged.next($event.target.value)">
-                                            <optgroup v-for="group in packagePresetGroups" v-bind:key="group.name" v-bind:label="group.name">
-                                                <option v-for="preset in group.presets" v-bind:key="preset.id" v-bind:value="preset.id">
-                                                    {{ preset.title }}
-                                                </option>
-                                            </optgroup>
-                                        </b-select>
+                                        <div class="packagePresetRow">
+                                            <b-select v-model="selectedPackagePreset" expanded>
+                                                <optgroup v-for="group in packagePresetGroups" v-bind:key="group.name" v-bind:label="group.name">
+                                                    <option v-for="preset in group.presets" v-bind:key="preset.id" v-bind:value="preset.id">
+                                                        {{ preset.title }}
+                                                    </option>
+                                                </optgroup>
+                                            </b-select>
+                                            <button class="button is-small is-rounded is-outlined" v-bind:disabled="selectedPackagePreset === ''"
+                                                v-on:click="packageLoadPreset.next(selectedPackagePreset)">
+                                                {{ selectedPackagePreset !== '' && selectedPackagePreset === loadedPackagePreset ? 'Reload' : 'Load' }}
+                                            </button>
+                                        </div>
                                     </b-field>
                                     <p class="packageStatus" v-if="packageStatus">{{ packageStatus }}</p>
                                     <template v-if="packageRows.length > 0">

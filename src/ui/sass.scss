@@ -950,6 +950,16 @@ input:invalid {
     margin-bottom: 0.5em;
     .input { flex: 1; min-width: 0; }
 }
+.packagePresetRow {
+    // the panel is narrow: full-width dropdown, Load button below it
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.4em;
+    width: 100%;
+    > :first-child { width: 100%; }
+    .select, select { width: 100%; }
+}
 .packageSourceName {
     flex: 1;
     min-width: 0;

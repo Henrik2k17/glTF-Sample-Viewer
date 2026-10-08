@@ -228,8 +228,20 @@ function installFetchShim() {
         }
         // a File, or a FileSystemFileHandle of a picked folder (read on demand)
         const file = typeof entry.getFile === "function" ? entry.getFile() : Promise.resolve(entry);
+        // "bytes=start-end" ranges: the renderer reads texture headers this way
+        const range = /^bytes=(\d+)-(\d+)$/.exec(new Headers(init?.headers).get("range") ?? "");
         return file.then(
-            (contents) => new Response(contents, { status: 200 }),
+            (contents) => {
+                if (range === null) {
+                    return new Response(contents, { status: 200 });
+                }
+                const start = Number(range[1]);
+                const end = Math.min(Number(range[2]) + 1, contents.size);
+                return new Response(contents.slice(start, end), {
+                    status: 206,
+                    headers: { "Content-Range": `bytes ${start}-${end - 1}/${contents.size}` }
+                });
+            },
             () => new Response(null, { status: 404, statusText: "Not Found" })
         );
     };

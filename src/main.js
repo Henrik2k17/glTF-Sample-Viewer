@@ -41,6 +41,16 @@ export default async () => {
         alpha: false,
         antialias: true
     });
+    // e.g. the GPU ran out of memory: the view stays black, so say why
+    canvas.addEventListener("webglcontextlost", (event) => {
+        event.preventDefault();
+        console.error("WebGL context lost", event.statusMessage ?? "");
+        app.error(
+            "The GPU ran out of memory or was reset (WebGL context lost), so nothing can be drawn any more. " +
+                "Reload the page; for MSFS packages, try a smaller preset.",
+            60000
+        );
+    });
     app.supportsFloatingPointFramebuffer =
         !!context.getExtension("EXT_color_buffer_half_float") ||
         !!context.getExtension("EXT_color_buffer_float");
@@ -159,11 +169,37 @@ export default async () => {
         })
     );
 
+    // Frees the shown model before the next one loads: two MSFS packages (~2 GB of textures
+    // each) don't fit in memory at the same time.
+    function releaseShownModel() {
+        const shown = state.gltf;
+        if (shown === undefined || shown === emptyGltf) {
+            return;
+        }
+        state.gltf = emptyGltf;
+        state.sceneIndex = 0;
+        state.cameraNodeIndex = undefined;
+        state.animationIndices = [];
+        state.animationTimeOverrides.clear();
+        state.physicsController.loadScene(state, 0);
+        setupInspector(emptyGltf, 0);
+        setupMaterials(emptyGltf);
+        app.msfsAnimationMode = false;
+        app.msfsAnimations = [];
+        selectMsfsAnimations([]);
+        refreshValidationSummary();
+        resourceLoader.unloadGltf(shown);
+        redraw = true;
+    }
+
     // whenever a new model is selected, load it and when complete pass the loaded gltf
     // into a stream back into the UI
+    let modelLoadGeneration = 0;
     const gltfLoaded = uiModel.model.pipe(
         mergeMap((model) => {
             uiModel.goToLoadingState();
+            const generation = ++modelLoadGeneration;
+            releaseShownModel();
 
             // Workaround for errors in ktx lib after loading an asset with ktx2 files for the second time:
             resourceLoader.initKtxLib();
@@ -172,6 +208,11 @@ export default async () => {
                 resourceLoader
                     .loadGltf(model.mainFile, model.additionalFiles, false)
                     .then((gltf) => {
+                        if (generation !== modelLoadGeneration) {
+                            // another model was chosen while this one loaded
+                            resourceLoader.unloadGltf(gltf);
+                            return state;
+                        }
                         state.gltf = gltf;
                         const missingImages = gltf.images.filter((image) => !image.isLoaded());
                         if (missingImages.length > 0) {
@@ -249,6 +290,9 @@ export default async () => {
                         return state;
                     })
                     .catch((error) => {
+                        if (generation !== modelLoadGeneration) {
+                            return state;
+                        }
                         console.error("Loading failed: " + error);
                         state.gltf = emptyGltf;
                         state.sceneIndex = 0;
@@ -797,12 +841,16 @@ export default async () => {
     // (logic/msfs_package.js) and loaded like any other model. State: msfsPackage (top).
     app.loadModeChanged.subscribe((mode) => (app.loadMode = mode));
 
-    async function openPackages(load, sourceLabel) {
+    // Lists the presets; one is loaded when the user clicks Load, or right away for a ?preset=
+    // URL parameter (autoLoad).
+    async function openPackages(load, sourceLabel, autoLoad = false) {
         const generation = ++msfsPackage.loading;
         app.packageError = "";
         app.packageStatus = "Opening package…";
         app.packageSource = sourceLabel;
         app.packagePresets = [];
+        app.selectedPackagePreset = "";
+        app.loadedPackagePreset = "";
         try {
             const packages = await load();
             if (generation !== msfsPackage.loading) {
@@ -837,12 +885,17 @@ export default async () => {
                     "presets are SimObjects/<category>/<name>/presets/<author>/<preset>/config/attached_objects.cfg.";
                 return;
             }
-            const wanted = (new URLSearchParams(window.location.search).get("preset") ?? "").toLowerCase();
-            const preset =
-                presets.find((entry) => wanted !== "" && (entry.name.toLowerCase() === wanted || entry.title.toLowerCase() === wanted)) ??
-                presets[0];
-            app.selectedPackagePreset = preset.id;
-            await loadPreset(preset.id);
+            const wanted = autoLoad ? (new URLSearchParams(window.location.search).get("preset") ?? "").toLowerCase() : "";
+            const wantedPreset = presets.find(
+                (entry) => wanted !== "" && (entry.name.toLowerCase() === wanted || entry.title.toLowerCase() === wanted)
+            );
+            app.selectedPackagePreset = (wantedPreset ?? presets[0]).id;
+            if (wantedPreset !== undefined) {
+                await loadPreset(wantedPreset.id);
+            } else {
+                app.packageStatus =
+                    `${presets.length} preset${presets.length === 1 ? "" : "s"} found. Choose one and click Load.`;
+            }
         } catch (error) {
             console.error("Opening the package failed", error);
             app.packageStatus = "";
@@ -884,6 +937,7 @@ export default async () => {
                 new Blob([JSON.stringify(json)], { type: "model/gltf+json" })
             );
             app.packageStatus = "Loading textures and geometry…";
+            app.loadedPackagePreset = id;
             uiModel.packageModels.next({ mainFile: msfsPackage.objectUrl, package: true, presetId: id });
         } catch (error) {
             console.error("Assembling the preset failed", error);
@@ -977,7 +1031,7 @@ export default async () => {
             app.showInspectorNode(item.wrapperNode);
         }
     });
-    app.packagePresetChanged.subscribe((id) => loadPreset(id));
+    app.packageLoadPreset.subscribe((id) => loadPreset(id));
     app.packageOpenUrl.subscribe((url) => {
         url = url.trim();
         if (url !== "") {
@@ -1029,7 +1083,7 @@ export default async () => {
         if (packageParam !== null) {
             app.loadMode = "package";
             app.packageUrl = packageParam;
-            openPackages(() => PackageFiles.fromUrl(packageParam), packageParam);
+            openPackages(() => PackageFiles.fromUrl(packageParam), packageParam, true);
         }
     }
 
