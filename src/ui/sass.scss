@@ -1596,7 +1596,8 @@ $checker: repeating-conic-gradient(#555 0% 25%, #3a3a3a 0% 50%) 50% / 12px 12px;
 .maxInline {
     margin-left: 8px;
 }
-.maxEdited .maxLabel {
+.maxEdited .maxLabel,
+.maxRadios.maxEdited .maxRadio:has(input:checked) {
     color: #a6d86e;
 }
 .maxDisabled {
