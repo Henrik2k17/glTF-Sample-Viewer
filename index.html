@@ -199,8 +199,8 @@
                                     </b-field>
                                     <b-field label="Livery" v-if="packageLiveries.length > 0"
                                         title="Liveries whose required tags this preset has (livery.cfg [Selection]). Reloads the preset.">
-                                        <b-select v-bind:value="selectedPackageLivery" expanded
-                                            v-on:input="packageLiveryChanged.next($event.target ? $event.target.value : $event)">
+                                        <b-select v-bind:model-value="selectedPackageLivery" expanded
+                                            v-on:update:model-value="packageLiveryChanged.next($event)">
                                             <option v-for="livery in packageLiveries" v-bind:key="livery.id" v-bind:value="livery.id">
                                                 {{ livery.title }}
                                             </option>

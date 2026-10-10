@@ -173,7 +173,11 @@ nav.tabs
 // tab content
 .b-tabs .tab-content
 {
-    width: 300px;
+    // grows with its content (long switch labels, node and material names) up to the cap;
+    // narrower content keeps the default width
+    width: fit-content;
+    min-width: 300px;
+    max-width: min(40vw, 640px);
     // necessary for scrollbar (overflow property) to work correct
     padding: 0px;
 }
@@ -182,6 +186,24 @@ nav.tabs
 {
     // necessary for scrollbar (overflow property) to work correct
     padding: 1em;
+}
+// Text that can wrap and dropdowns (natural width = longest option) don't widen the panel;
+// contain: inline-size drops them from its content width.
+.tabContent p
+{
+    contain: inline-size;
+}
+.tabContent .select:not(.is-multiple),
+.tabContent .select:not(.is-multiple) select
+{
+    contain: inline-size;
+    width: 100%;
+}
+// except the package preset and livery dropdowns: their aircraft titles are worth the width
+.tabContent .msfsPackage .select:not(.is-multiple),
+.tabContent .msfsPackage .select:not(.is-multiple) select
+{
+    contain: none;
 }
 
 textarea
@@ -802,6 +824,11 @@ input:invalid {
 .inspectorSection {
     margin-bottom: 0.75em;
 }
+// Blocks with a width: 100% table: Chrome lets a percentage-width table stretch the
+// content-sized side panel to its cap, so these blocks don't count toward the panel width.
+.inspectorSection, .inspectorSummary, .maxRolloutBody {
+    contain: inline-size;
+}
 .inspectorSectionTitle {
     font-size: 12px;
     font-weight: 600;
@@ -863,6 +890,8 @@ input:invalid {
     flex-direction: column;
 }
 .textureFolderName {
+    // paths are cut with an ellipsis (full path in the tooltip), they don't widen the panel
+    contain: inline-size;
     font-size: 14px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -949,6 +978,7 @@ input:invalid {
     .select, select { width: 100%; }
 }
 .packageSourceName {
+    contain: inline-size;
     flex: 1;
     min-width: 0;
     font-size: 12px;
@@ -1354,6 +1384,10 @@ $checker: repeating-conic-gradient(#555 0% 25%, #3a3a3a 0% 50%) 50% / 12px 12px;
     margin: 0.9em 0 0.3em 0;
 }
 .validationSectionCount {
+    // wraps instead of widening the panel
+    contain: inline-size;
+    flex: 1 1 0;
+    text-align: right;
     font-weight: normal;
     text-transform: none;
     letter-spacing: normal;
@@ -1441,7 +1475,7 @@ $checker: repeating-conic-gradient(#555 0% 25%, #3a3a3a 0% 50%) 50% / 12px 12px;
 // Materials tab: material editor in the style of the MSFS 2024 material in 3ds Max
 // (rollouts, group boxes, spinners, texture slot buttons).
 .materialsWide .tab-content {
-    width: 420px;
+    min-width: 420px;
 }
 .maxEditor {
     margin-top: 0.5em;
