@@ -91,6 +91,9 @@ class BehaviorExpander {
                     if (text === undefined) {
                         return undefined;
                     }
+                    // compiled behaviors name the code strings by number (<1820648769115568245>),
+                    // which XML parsers reject: prefix them (StringID "N" -> element "S_N")
+                    text = text.replace(/<(\/?)(\d+)(\s*\/?)>/g, "<$1S_$2$3>");
                     const doc = new DOMParser().parseFromString(text, "text/xml");
                     if (doc.querySelector("parsererror") !== null) {
                         this.problem(`${path}: not valid XML`);
@@ -561,7 +564,7 @@ class BehaviorExpander {
         const section = (name) => childElements(root).find((e) => lower(e) === name.toLowerCase());
         const strings = new Map();
         for (const entry of childElements(section("Strings") ?? root.ownerDocument.createElement("x"))) {
-            strings.set(entry.localName, entry.textContent);
+            strings.set(entry.localName.replace(/^S_/, ""), entry.textContent);
         }
         const base = result.components.length;
         for (const component of childElements(section("Components") ?? root.ownerDocument.createElement("x"))) {

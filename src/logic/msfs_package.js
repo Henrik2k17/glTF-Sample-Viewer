@@ -120,10 +120,20 @@ class PackageFiles {
             }
             roots.get(root).push([relativePath, file]);
         };
-        for (const [path, file] of entries) {
+        // Package roots: the folders with a SimObjects folder. Every file below a root belongs
+        // to it (also ModelBehaviorDefs, MaterialLibs, ... next to SimObjects); with nested
+        // roots the deepest one wins.
+        const rootPaths = new Set();
+        for (const [path] of entries) {
             const match = /(^|\/)simobjects\//i.exec(path);
             if (match !== null) {
-                const root = path.substring(0, match.index + match[1].length);
+                rootPaths.add(path.substring(0, match.index + match[1].length));
+            }
+        }
+        const sortedRoots = [...rootPaths].sort((a, b) => b.length - a.length);
+        for (const [path, file] of entries) {
+            const root = sortedRoots.find((prefix) => path.toLowerCase().startsWith(prefix.toLowerCase()));
+            if (root !== undefined) {
                 addFile(root, path.substring(root.length), file);
             }
         }
