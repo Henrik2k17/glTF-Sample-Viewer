@@ -11,11 +11,7 @@ const MaterialsTab = 8;
 const appCreated = createApp({
     data() {
         return {
-            modelChanged: new Subject(),
-            flavourChanged: new Subject(),
             sceneChanged: new Subject(),
-            cameraChanged: new Subject(),
-            selectedGraphChanged: new Subject(),
 
             debugchannelChanged: new Subject(),
             tonemapChanged: new Subject(),
@@ -25,40 +21,18 @@ const appCreated = createApp({
 
             iblChanged: new Subject(),
             blurEnvChanged: new Subject(),
-            morphingChanged: new Subject(),
-            interactivityChanged: new Subject(),
             colorChanged: new Subject(),
 
             environmentRotationChanged: new Subject(),
             animationPlayChanged: new Subject(),
-            graphPlayChanged: new Subject(),
             animationResetChanged: new Subject(),
-            graphResetChanged: new Subject(),
-            variantChanged: new Subject(),
             exposureChanged: new Subject(),
 
-            clearcoatChanged: new Subject(),
-            sheenChanged: new Subject(),
-            transmissionChanged: new Subject(),
-            diffuseTransmissionChanged: new Subject(),
             cameraExport: new Subject(),
 
             captureCanvas: new Subject(),
             iblIntensityChanged: new Subject(),
 
-            volumeChanged: new Subject(),
-            iorChanged: new Subject(),
-            iridescenceChanged: new Subject(),
-            retroreflectionChanged: new Subject(),
-            anisotropyChanged: new Subject(),
-            dispersionChanged: new Subject(),
-            specularChanged: new Subject(),
-            emissiveStrengthChanged: new Subject(),
-            volumeScatteringChanged: new Subject(),
-            hoverabilityChanged: new Subject(),
-            selectabilityChanged: new Subject(),
-            nodeVisibilityChanged: new Subject(),
-            gaussianSplattingChanged: new Subject(),
             floatingPointFramebufferChanged: new Subject(),
             showMsfsInvisibleMaterialsChanged: new Subject(),
             msfsNightLightingChanged: new Subject(),
@@ -94,53 +68,23 @@ const appCreated = createApp({
             selectedAnimationsChanged: new Subject(),
             selectedEnvironmentChanged: new Subject(),
 
-            physicsEnabledChanged: new Subject(),
-            physicsResetChanged: new Subject(),
-            physicsEngineChanged: new Subject(),
-            physicsStepChanged: new Subject(),
-            physicsColliderDebugChanged: new Subject(),
-            physicsJointDebugChanged: new Subject(),
 
             validatorChanged: new Subject(),
 
             fullheight: true,
             right: true,
-            models: ["DamagedHelmet"],
-            flavours: [
-                "glTF",
-                "glTF-Binary",
-                "glTF-Quantized",
-                "glTF-Draco",
-                "glTF-pbrSpecularGlossiness"
-            ],
             scenes: [{ title: "0" }, { title: "1" }],
-            cameras: [{ title: "User Camera", index: -1 }],
-            materialVariants: ["None"],
 
             animations: [{ title: "None" }],
-            graphs: [],
             tonemaps: [{ title: "None" }],
             debugchannels: [{ title: "None" }],
-            xmp: [{ title: "xmp" }],
-            assetCopyright: "",
-            assetGenerator: "",
             statistics: [],
 
-            selectedModel: "DamagedHelmet",
-            selectedFlavour: "",
             selectedScene: {},
-            selectedCamera: {},
-            selectedVariant: "None",
             selectedAnimations: [],
             disabledAnimations: [],
-            selectedGraph: null,
-            selectedPhysicsEngine: "nvidia-physx",
-            physicsColliderDebug: false,
-            physicsJointDebug: false,
 
             animationState: true,
-            graphState: true,
-            physicsState: true,
 
             validationReport: {},
             validationReportDescription: {},
@@ -274,27 +218,7 @@ const appCreated = createApp({
             // rows: { id, depth, name, kind, visible, problems, title, hasChildren }
             packageRows: [],
             packageCollapsed: {},
-            morphing: true,
-            interactivity: true,
-            clearcoatEnabled: true,
-            sheenEnabled: true,
-            transmissionEnabled: true,
-            volumeEnabled: true,
-            iorEnabled: true,
-            iridescenceEnabled: true,
-            retroreflectionEnabled: true,
-            diffuseTransmissionEnabled: true,
-            anisotropyEnabled: true,
-            dispersionEnabled: true,
-            specularEnabled: true,
-            emissiveStrengthEnabled: true,
-            volumeScatteringEnabled: true,
-            hoverabilityEnabled: true,
-            selectabilityEnabled: true,
-            nodeVisibilityEnabled: true,
-            gaussianSplattingEnabled: true,
 
-            hasPhysics: false,
 
             activeTabIndex: 0,
             activeTab: 0,
@@ -307,39 +231,13 @@ const appCreated = createApp({
             noUi: false,
 
             // these are handles for certain ui change related things
-            environmentVisiblePrefState: true,
-            volumeEnabledPrefState: true,
-            customEvents: [],
-            selectedCustomEvent: null,
-            customEventValues: {},
-            customEventEnabled: false,
-            customEventFocusedInput: null,
-            customEventFocusedIndex: null,
-            customEventValid: true,
-            customEventSendClicked: new Subject()
+            environmentVisiblePrefState: true
         };
     },
     watch: {
         selectedAnimations: function (newValue) {
             this.selectedAnimationsChanged.next(newValue);
         },
-        selectedGraph: function (newValue) {
-            this.selectedGraphChanged.next(newValue);
-        },
-        selectedCustomEvent: function (newValue) {
-            this.updateCustomEventValues(newValue);
-        },
-        customEvents: function (newValue) {
-            // Auto-select the first custom event when the array is populated
-            if (newValue && newValue.length > 0) {
-                this.selectedCustomEvent = newValue[0].id;
-            } else {
-                this.selectedCustomEvent = null;
-            }
-        },
-        customEventFocusedInput: function () {
-            this.customEventValid = this.isCustomEventValid();
-        }
     },
     beforeMount: function () {
         // Definition of mobile: https://bulma.io/documentation/start/responsiveness/
@@ -582,30 +480,6 @@ const appCreated = createApp({
         },
         msfsDockPlaying() {
             return this.selectedMsfsAnimations.some((entry) => entry.playing);
-        },
-        hasInteractivityGraphs() {
-            return this.graphs && this.graphs.length > 0;
-        },
-        showGraphsTab() {
-            return this.hasInteractivityGraphs && this.interactivity;
-        },
-        showPhysicsTab() {
-            return this.hasPhysics;
-        },
-        currentCustomEvent() {
-            if (!this.selectedCustomEvent || !this.customEvents) return null;
-            return this.customEvents.find((event) => event.id === this.selectedCustomEvent);
-        },
-        customEventInputs() {
-            if (!this.currentCustomEvent) return [];
-            const event = this.currentCustomEvent;
-            if (!event.values) return [];
-
-            return Object.keys(event.values).map((key) => ({
-                name: key,
-                type: event.values[key].type,
-                value: event.values[key].value
-            }));
         }
     },
     methods: {
@@ -631,12 +505,6 @@ const appCreated = createApp({
             document.body.appendChild(element);
             element.click();
             document.body.removeChild(element);
-        },
-
-        isCustomEventValid() {
-            const form = document.getElementById("customEventForm");
-            if (!form) return true;
-            return form.checkValidity();
         },
 
         /**
@@ -726,22 +594,6 @@ const appCreated = createApp({
             } else {
                 this.renderEnv = this.environmentVisiblePrefState;
                 this.renderEnvChanged.next(this.renderEnv);
-            }
-        },
-        transmissionTriggered: function (value) {
-            if (value == false && this.diffuseTransmissionEnabled == false) {
-                this.volumeEnabledPrefState = this.volumeEnabled;
-                this.volumeEnabled = false;
-            } else if (value == true && this.diffuseTransmissionEnabled == false) {
-                this.volumeEnabled = this.volumeEnabledPrefState;
-            }
-        },
-        diffuseTransmissionTriggered: function (value) {
-            if (value == false && this.transmissionEnabled == false) {
-                this.volumeEnabledPrefState = this.volumeEnabled;
-                this.volumeEnabled = false;
-            } else if (value == true && this.transmissionEnabled == false) {
-                this.volumeEnabled = this.volumeEnabledPrefState;
             }
         },
         collapseActiveTab: function (event, item) {
@@ -979,73 +831,6 @@ const appCreated = createApp({
 
         toggleUI() {
             this.uiVisible = !this.uiVisible;
-        },
-        updateCustomEventValues(selectedEventId) {
-            if (!selectedEventId || !this.customEvents) {
-                this.customEventValues = {};
-                return;
-            }
-
-            const event = this.customEvents.find((e) => e.id === selectedEventId);
-            if (!event || !event.values) {
-                this.customEventValues = {};
-                return;
-            }
-
-            // Initialize all input values based on the event definition
-            const values = {};
-            Object.keys(event.values).forEach((key) => {
-                const valueDefn = event.values[key];
-                values[key] =
-                    valueDefn.value !== undefined
-                        ? valueDefn.value
-                        : this.getDefaultValue(valueDefn.type);
-            });
-            this.customEventValues = values;
-        },
-        getDefaultValue(type) {
-            switch (type) {
-            case "bool":
-                return false;
-            case "int":
-                return 0;
-            case "float":
-                return 0.0;
-            case "float2":
-                return [0, 0];
-            case "float3":
-                return [0, 0, 0];
-            case "float4":
-                return [0, 0, 0, 0];
-            case "float2x2":
-                return [1, 0, 0, 1];
-            case "float3x3":
-                return [1, 0, 0, 0, 1, 0, 0, 0, 1];
-            case "float4x4":
-                return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-            default:
-                return null;
-            }
-        },
-        sendCustomEvent() {
-            if (!this.selectedCustomEvent || !this.currentCustomEvent) {
-                this.$buefy.toast.open({
-                    message: "Please select a custom event first",
-                    type: "is-warning",
-                    duration: 3000
-                });
-                return;
-            }
-
-            this.customEventSendClicked.next({
-                eventId: this.selectedCustomEvent,
-                values: this.customEventValues
-            });
-            this.$buefy.toast.open({
-                message: `Custom event '${this.selectedCustomEvent}' sent successfully!`,
-                type: "is-success",
-                duration: 3000
-            });
         }
     }
 });

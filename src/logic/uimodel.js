@@ -14,21 +14,29 @@ import { GltfState } from "@khronosgroup/gltf-viewer";
 import { SimpleDropzone } from "simple-dropzone";
 import normalizeWheel from "normalize-wheel";
 
+// Debug channel groups shown (GltfState.DebugOutput keys) with their dropdown labels; the KHR-only
+// groups are left out. MSFS clear coat and iridescent materials render through the KHR ones.
+const DebugChannelGroups = {
+    NONE: undefined,
+    generic: "Geometry & Common",
+    mr: "Base Color, Metallic, Roughness",
+    clearcoat: "MSFS Clear Coat",
+    iridescence: "MSFS Iridescent",
+    msfs: "MSFS"
+};
+
 // this class wraps all the observables for the gltf sample viewer state
 // the data streams coming out of this should match the data required in GltfState
 // as close as possible
 class UIModel {
-    constructor(app, modelPathProvider, environments) {
+    constructor(app, environments) {
         this.app = app;
-
-        this.app.models = modelPathProvider.getAllKeys();
 
         const queryString = window.location.search;
         const urlParams = new URLSearchParams(queryString);
         const modelURL = urlParams.get("model");
 
         this.scene = app.sceneChanged.pipe();
-        this.camera = app.cameraChanged.pipe();
         this.environmentRotation = app.environmentRotationChanged.pipe();
         this.app.environments = environments;
         const selectedEnvironment = app.selectedEnvironmentChanged.pipe(
@@ -42,32 +50,16 @@ class UIModel {
         }));
         this.tonemap = app.tonemapChanged.pipe(startWith(GltfState.ToneMaps.KHR_PBR_NEUTRAL));
 
-        this.app.debugchannels = Object.keys(GltfState.DebugOutput).map((key) => ({
-            title: GltfState.DebugOutput[key]
+        // channels of the material features MSFS materials use (KHR-only ones left out)
+        this.app.debugchannels = Object.entries(DebugChannelGroups).map(([key, group]) => ({
+            title: GltfState.DebugOutput[key],
+            group: group
         }));
         this.debugchannel = app.debugchannelChanged.pipe(startWith(GltfState.DebugOutput.NONE));
 
         this.exposure = app.exposureChanged.pipe();
         this.skinningEnabled = app.skinningChanged.pipe();
         this.inputSmoothingEnabled = app.inputSmoothingChanged.pipe();
-        this.morphingEnabled = app.morphingChanged.pipe();
-        this.clearcoatEnabled = app.clearcoatChanged.pipe();
-        this.sheenEnabled = app.sheenChanged.pipe();
-        this.transmissionEnabled = app.transmissionChanged.pipe();
-        this.diffuseTransmissionEnabled = app.diffuseTransmissionChanged.pipe();
-        this.volumeEnabled = app.volumeChanged.pipe();
-        this.iorEnabled = app.iorChanged.pipe();
-        this.iridescenceEnabled = app.iridescenceChanged.pipe();
-        this.retroreflectionEnabled = app.retroreflectionChanged.pipe();
-        this.anisotropyEnabled = app.anisotropyChanged.pipe();
-        this.dispersionEnabled = app.dispersionChanged.pipe();
-        this.specularEnabled = app.specularChanged.pipe();
-        this.emissiveStrengthEnabled = app.emissiveStrengthChanged.pipe();
-        this.volumeScatteringEnabled = app.volumeScatteringChanged.pipe();
-        this.hoverabilityEnabled = app.hoverabilityChanged.pipe();
-        this.selectabilityEnabled = app.selectabilityChanged.pipe();
-        this.nodeVisibilityEnabled = app.nodeVisibilityChanged.pipe();
-        this.gaussianSplattingEnabled = app.gaussianSplattingChanged.pipe();
         this.floatingPointFramebufferEnabled = app.floatingPointFramebufferChanged.pipe();
         this.showMsfsInvisibleMaterials = app.showMsfsInvisibleMaterialsChanged.pipe();
         this.msfsNightLighting = app.msfsNightLightingChanged.pipe();
@@ -99,7 +91,6 @@ class UIModel {
         this.addEnvironment = app.addEnvironmentChanged.pipe();
         this.captureCanvas = app.captureCanvas.pipe();
         this.cameraValuesExport = app.cameraExport.pipe();
-        this.interactivityEnabled = app.interactivityChanged.pipe();
 
         const initialClearColor = "#303542";
         this.app.clearColor = initialClearColor;
@@ -116,19 +107,9 @@ class UIModel {
         );
 
         this.animationPlay = app.animationPlayChanged.pipe();
-        this.graphPlay = app.graphPlayChanged.pipe();
         this.animationReset = app.animationResetChanged.pipe();
-        this.graphReset = app.graphResetChanged.pipe();
-        this.customEventSend = app.customEventSendClicked.pipe();
         this.activeAnimations = app.selectedAnimationsChanged.pipe();
-        this.selectedGraph = app.selectedGraphChanged.pipe();
 
-        this.physicsReset = app.physicsResetChanged.pipe();
-        this.physicsEngine = app.physicsEngineChanged.pipe();
-        this.physicsEnabled = app.physicsEnabledChanged.pipe();
-        this.physicsStep = app.physicsStepChanged.pipe();
-        this.physicsColliderDebug = app.physicsColliderDebugChanged.pipe();
-        this.physicsJointDebug = app.physicsJointDebugChanged.pipe();
 
         const canvas = document.getElementById("canvas");
         canvas.addEventListener("dragenter", () => (this.app.showDropDownOverlay = true));
@@ -136,34 +117,9 @@ class UIModel {
 
         const inputObservables = getInputObservables(canvas, this.app);
 
-        const dropdownGltfChanged = app.modelChanged.pipe(
-            // no default model when a model or MSFS package is given in the URL
-            startWith(modelURL === null && urlParams.get("package") === null ? "DamagedHelmet" : null),
-            filter((value) => value !== null),
-            map((value) => {
-                app.flavours = modelPathProvider.getModelFlavours(value);
-                if (app.flavours.includes("glTF")) {
-                    app.selectedFlavour = "glTF";
-                } else {
-                    app.selectedFlavour = app.flavours[0];
-                }
-                return modelPathProvider.resolve(value, app.selectedFlavour);
-            }),
-            map((value) => ({ mainFile: value }))
-        );
-
-        const dropdownFlavourChanged = app.flavourChanged.pipe(
-            map((value) => modelPathProvider.resolve(app.selectedModel, value)),
-            map((value) => ({ mainFile: value }))
-        );
-
         // "Reload model" re-emits the last model, e.g. after adding a texture folder
         let lastModel = undefined;
-        const selectedModel = merge(
-            dropdownGltfChanged,
-            dropdownFlavourChanged,
-            inputObservables.droppedGltf
-        ).pipe(
+        const selectedModel = inputObservables.droppedGltf.pipe(
             map((model) => {
                 lastModel = model;
                 return model;
@@ -178,36 +134,6 @@ class UIModel {
             inputObservables.droppedHdr
         ).pipe(startWith(environments[initialEnvironment]));
 
-        this.hdr.subscribe(async (hdr) => {
-            if (hdr.license_path !== undefined) {
-                try {
-                    const response = await fetch(hdr.license_path);
-                    if (!response.ok) {
-                        throw new Error("License file not found");
-                    }
-                    let text = await response.text();
-                    const license = text.split("SPDX-License-Identifier: ")[1];
-                    console.log(license);
-                    text = text.replace("SPDX-FileCopyrightText: ", "");
-                    text = text.replace(
-                        /SPDX-License-Identifier:(.)*/g,
-                        `, <a href="${hdr.hdr_path}">Source</a>, License: `
-                    );
-                    text += `<a href="${hdr.base_path}/LICENSES/${license}.txt">${license}</a>`;
-                    text = "(c) " + text;
-                    text = text.replaceAll("\n", "");
-                    text = text.replaceAll(" ,", ",");
-                    this.app.environmentLicense = text;
-
-                    // eslint-disable-next-line no-unused-vars
-                } catch (error) {
-                    this.app.environmentLicense = "N/A";
-                }
-            } else {
-                this.app.environmentLicense = "N/A";
-            }
-        });
-
         merge(this.addEnvironment, inputObservables.droppedHdr).subscribe((hdr) => {
             const hdrPath = hdr.hdr_path;
             this.app.environments[hdrPath.name] = {
@@ -217,39 +143,11 @@ class UIModel {
             this.app.selectedEnvironment = hdrPath.name;
         });
 
-        this.variant = app.variantChanged.pipe();
-
-        // remove last filename (not on a reload, which keeps the same model)
-        this.model
-            .pipe(filter(() => this.app.models.at(-1) === this.lastDroppedFilename))
-            .subscribe(() => {
-                this.app.models.pop();
-                this.lastDroppedFilename = undefined;
-            });
-
-        let droppedGLtfFileName = inputObservables.droppedGltf.pipe(
-            map((droppedGltf) => {
-                // Right now mainFile should always be an array of length.
-                // The first element is just the filename as string, the second element is the File object.
-                // To prevent potential errors where this might not be the case,
-                // we have this if and return undefined
-                if (droppedGltf.mainFile.length > 1) {
-                    return droppedGltf.mainFile[1].name;
-                } else {
-                    return undefined;
-                }
-            })
-        );
-
         if (modelURL !== null) {
             const loadFromUrlObservable = new Observable((subscriber) => {
                 lastModel = { mainFile: modelURL };
                 subscriber.next(lastModel);
             });
-            droppedGLtfFileName = merge(
-                droppedGLtfFileName,
-                loadFromUrlObservable.pipe(map((data) => data.mainFile))
-            );
             this.model = merge(this.model, loadFromUrlObservable);
         }
 
@@ -267,21 +165,6 @@ class UIModel {
         );
         this.model = merge(this.model, reloadedModel);
 
-        droppedGLtfFileName
-            .pipe(filter((filename) => filename !== undefined))
-            .subscribe((filename) => {
-                filename = filename.split("/").pop();
-                const fileExtension = filename.split(".").pop();
-                filename = filename.substr(0, filename.lastIndexOf("."));
-
-                this.app.models.push(filename);
-                this.app.selectedModel = filename;
-                this.lastDroppedFilename = filename;
-
-                app.flavours = [fileExtension];
-                app.selectedFlavour = fileExtension;
-            });
-
         this.orbit = inputObservables.orbit;
         this.pan = inputObservables.pan;
         this.zoom = inputObservables.zoom;
@@ -290,12 +173,8 @@ class UIModel {
     }
 
     attachGltfLoaded(gltfLoaded) {
-        this.attachCameraChangeObservable(gltfLoaded);
         gltfLoaded.subscribe((state) => {
             const gltf = state.gltf;
-
-            this.app.assetCopyright = gltf.asset.copyright ?? "N/A";
-            this.app.assetGenerator = gltf.asset.generator ?? "N/A";
 
             this.app.selectedScene = state.sceneIndex;
             this.app.scenes = gltf.scenes.map((scene, index) => ({
@@ -305,46 +184,11 @@ class UIModel {
 
             this.app.selectedAnimations = state.animationIndices;
             this.app.animationState = true;
-            this.app.graphState = true;
-            this.app.physicsState = true;
 
-            if (gltf && gltf?.extensions?.KHR_materials_variants?.variants !== undefined) {
-                this.app.materialVariants = [
-                    "None",
-                    ...gltf.extensions.KHR_materials_variants.variants.map(
-                        (variant) => variant?.name ?? "Unnamed"
-                    )
-                ];
-            } else {
-                this.app.materialVariants = ["None"];
-            }
             this.app.animations = gltf.animations.map((animation, index) => ({
                 title: animation.name ?? `Animation ${index}`,
                 index: index
             }));
-
-            // Set up interactivity graphs if available
-            if (
-                gltf?.extensions?.KHR_interactivity?.graphs !== undefined &&
-                state.renderingParameters.enabledExtensions.KHR_interactivity
-            ) {
-                this.app.graphs = gltf.extensions.KHR_interactivity.graphs.map((graph, index) => ({
-                    title: graph.name ?? `Graph ${index}`,
-                    index: index
-                }));
-                this.app.selectedGraph = state.graphController.graphIndex;
-                this.app.customEvents = state.graphController.customEvents || [];
-            } else {
-                this.app.graphs = [];
-                this.app.customEvents = [];
-            }
-
-            this.app.hasPhysics = gltf?.extensionsUsed?.includes("KHR_physics_rigid_bodies");
-
-            this.app.xmp =
-                gltf?.extensions?.KHR_xmp_json_ld?.packets[
-                    gltf?.asset?.extensions?.KHR_xmp_json_ld.packet
-                ] ?? null;
         });
     }
 
@@ -411,43 +255,6 @@ class UIModel {
 
     disabledAnimations(disabledAnimationsObservable) {
         disabledAnimationsObservable.subscribe((data) => (this.app.disabledAnimations = data));
-    }
-
-    attachCameraChangeObservable(sceneChangeObservable) {
-        const cameraIndices = sceneChangeObservable.pipe(
-            map((state) => {
-                let gltf = state.gltf;
-                let cameraIndices = [{ title: "User Camera", index: -1 }];
-                if (gltf.scenes[state.sceneIndex] !== undefined) {
-                    cameraIndices.push(
-                        ...gltf.nodes.map((node, index) => {
-                            if (
-                                node.camera !== undefined &&
-                                gltf.scenes[state.sceneIndex].includesNode(gltf, index)
-                            ) {
-                                let name = node.name ?? "Node " + index;
-                                const camera = gltf.cameras[node.camera];
-                                if (camera.name !== undefined && camera.name !== "") {
-                                    name += ": " + camera.name;
-                                } else {
-                                    name += ": Camera " + node.camera;
-                                }
-                                return { title: name, index: index };
-                            }
-                        })
-                    );
-                }
-                cameraIndices = cameraIndices.filter(function (el) {
-                    return el !== undefined;
-                });
-                return cameraIndices;
-            })
-        );
-        cameraIndices.subscribe((cameras) => (this.app.cameras = cameras));
-        const loadedCameraIndex = sceneChangeObservable.pipe(map((state) => state.cameraNodeIndex));
-        loadedCameraIndex.subscribe(
-            (index) => (this.app.selectedCamera = index !== undefined ? index : -1)
-        );
     }
 
     goToLoadingState() {
