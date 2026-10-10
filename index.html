@@ -1191,6 +1191,7 @@
                                 </b-field>
                                 <b-field label="Debug" class="subtitle">
                                     <b-switch v-model="showPerfOverlay" title="Frame time, draw calls, triangles and texture memory (also ?perf=1 in the URL)">Performance overlay</b-switch>
+                                    <b-switch v-model="frustumCulling" title="Skip parts outside the view (switch off to compare)">Frustum culling</b-switch>
                                 </b-field>
                                 <b-field label="Current Camera Values" class="subtitle">
                                     <button v-on:click="cameraExport.next($event.target.value)" type="button" class="button is-rounded"><i

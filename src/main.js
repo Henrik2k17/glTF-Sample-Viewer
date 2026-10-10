@@ -1688,6 +1688,10 @@ export default async () => {
     if (new URLSearchParams(window.location.search).get("perf") === "1") {
         app.showPerfOverlay = true;
     }
+    app.$watch("frustumCulling", (enabled) => {
+        state.renderingParameters.frustumCulling = enabled;
+        redraw = true;
+    });
 
     // configure the animation loop
     const past = {};

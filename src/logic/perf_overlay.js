@@ -92,7 +92,8 @@ class PerfOverlay {
         const lines = [
             `<b>${frames.length}</b> redraws/s · CPU <b>${ms(average((frame) => frame.cpu))} ms</b> (max ${ms(max((frame) => frame.cpu))}) · GPU ${gpu}`,
             sections.length > 0 ? `&nbsp; ${sections.join(" · ")}` : undefined,
-            `Draw calls <b>${count(last?.draws ?? 0)}</b> · triangles ${count(last?.triangles ?? 0)}`,
+            `Draw calls <b>${count(last?.draws ?? 0)}</b> · triangles ${count(last?.triangles ?? 0)}` +
+                (last?.drawables > 0 ? ` · culled ${count(last.culled)} of ${count(last.drawables)} parts` : ""),
             passes.length > 0 ? `&nbsp; ${passes.join(" · ")}` : undefined,
             `Nodes ${count(shownNodes)} shown of ${count(nodes)} · textures ${gltf?.images.length ?? 0} (~${megabytes(this.textureCache.bytes)})`,
             `Canvas ${canvas.width}×${canvas.height} (DPR ${dpr})`
