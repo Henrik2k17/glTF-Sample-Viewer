@@ -183,6 +183,11 @@ nav.tabs
 {
     contain: inline-size;
 }
+// a label in a flex row (Statistics card headers) would shrink to nothing
+.tabContent .cardHeader > p
+{
+    contain: none;
+}
 .tabContent .select:not(.is-multiple),
 .tabContent .select:not(.is-multiple) select
 {
