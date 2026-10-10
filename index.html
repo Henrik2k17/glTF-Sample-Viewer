@@ -941,6 +941,8 @@
                                 <div class="loadModeSwitch behaviorSubTabs">
                                     <button class="button is-small" v-bind:class="{ 'is-selected': behaviorSubTab === 'visibility' }"
                                         v-on:click="behaviorSubTab = 'visibility'">Visibility</button>
+                                    <button class="button is-small" v-bind:class="{ 'is-selected': behaviorSubTab === 'animations' }"
+                                        v-on:click="behaviorSubTab = 'animations'">Animations</button>
                                 </div>
                                 <p class="inspectorInfo" v-if="behaviorStatus">{{ behaviorStatus }}</p>
                                 <details class="inspectorSummary" v-if="behaviorProblems.length > 0">
@@ -960,73 +962,89 @@
                                         <button class="button is-small is-rounded is-outlined" title="Set every variable back to 0"
                                             v-on:click="behaviorVariablesReset.next(undefined)">Reset variables</button>
                                     </div>
-
-                                    <!-- Variables read by the visibility codes -->
-                                    <div class="behaviorSection" v-on:click="behaviorVariablesOpen = !behaviorVariablesOpen">
-                                        <span class="packageTwisty">{{ behaviorVariablesOpen ? '&#9662;' : '&#9656;' }}</span>
-                                        Variables ({{ behaviorVariables.length }})
-                                    </div>
-                                    <template v-if="behaviorVariablesOpen">
-                                        <input class="input is-small inspectorFilter" type="text" placeholder="Filter variables" v-model="behaviorVariableFilter">
-                                        <div class="behaviorVariables">
-                                            <div v-for="variable in shownBehaviorVariables" v-bind:key="variable.key" class="behaviorVariable"
-                                                v-bind:class="{ 'behaviorVariableFocused': behaviorFocus === variable.key, 'behaviorVariableSet': variable.value !== 0 }">
-                                                <span class="behaviorKind" v-bind:class="'behaviorKind-' + variable.kind">{{ variable.kind }}</span>
-                                                <span class="behaviorVariableName" v-bind:title="variable.title"
-                                                    v-on:click="behaviorFocus = behaviorFocus === variable.key ? '' : variable.key">{{ variable.label }}</span>
-                                                <span class="behaviorUsers" title="Visibility codes reading this variable">{{ variable.users }}</span>
-                                                <input v-if="variable.boolean" type="checkbox" v-bind:checked="variable.value !== 0"
-                                                    v-bind:aria-label="variable.label"
-                                                    v-on:change="behaviorVariableChanged.next({ key: variable.key, value: $event.target.checked ? 1 : 0 })">
-                                                <input v-else class="input is-small behaviorNumber" type="number" step="any" v-bind:value="variable.value"
-                                                    v-bind:aria-label="variable.label"
-                                                    v-on:change="behaviorVariableChanged.next({ key: variable.key, value: Number($event.target.value) || 0 })">
-                                                <div v-if="!variable.boolean && variable.values.length > 0" class="behaviorValues">
-                                                    <button v-for="value in variable.values" v-bind:key="value" class="behaviorValue"
-                                                        v-bind:class="{ 'is-selected': variable.value === value }"
-                                                        title="A value the codes compare this variable with"
-                                                        v-on:click="behaviorVariableChanged.next({ key: variable.key, value: value })">{{ value }}</button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </template>
-
-                                    <!-- Visibility codes per attachment -->
-                                    <div class="behaviorSection behaviorSectionStatic">
-                                        Visibility codes
-                                        <span v-if="behaviorFocus" class="behaviorFocusNote">reading {{ behaviorFocusLabel }}
-                                            <a v-on:click="behaviorFocus = ''">show all</a></span>
-                                    </div>
+                                </template>
+                                <template v-else>
+                                    <p class="inspectorInfo">
+                                        {{ behaviorAnimations.length }} animation codes &middot; {{ behaviorAnimationCounts.moving }} moving
+                                        <template v-if="behaviorAnimationCounts.missing > 0">&middot; {{ behaviorAnimationCounts.missing }} without a glTF animation</template>
+                                        &middot; each code gives the keyframe its animation goes to, at its lag (keyframes per second)
+                                    </p>
                                     <div class="behaviorToolbar">
-                                        <input class="input is-small inspectorFilter" type="text" placeholder="Filter by node or code" v-model="behaviorFilter">
-                                        <div class="select is-small behaviorShowSelect">
-                                            <select v-model="behaviorShow" aria-label="Show">
-                                                <option value="all">All</option>
-                                                <option value="hidden">Hidden</option>
-                                                <option value="shown">Shown</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <div class="behaviorList">
-                                        <template v-for="group in behaviorGroups" v-bind:key="group.id">
-                                            <div class="materialGroup" v-bind:title="group.title" v-on:click="toggleBehaviorGroup(group.id)">
-                                                <span class="packageTwisty">{{ behaviorCollapsed[group.id] ? '&#9656;' : '&#9662;' }}</span>
-                                                <span class="materialGroupName">{{ group.name }}</span>
-                                                <span class="materialCount">{{ group.hidden }} / {{ group.rows.length }} hidden</span>
-                                            </div>
-                                            <template v-if="!behaviorCollapsed[group.id]">
-                                                <div v-for="row in group.rows" v-bind:key="row.id" class="behaviorRow"
-                                                    v-bind:class="'behaviorRow-' + row.state">
-                                                    <span class="behaviorState" v-bind:title="row.stateTitle">{{ behaviorStateIcons[row.state] }}</span>
-                                                    <span class="behaviorNode" v-bind:title="row.nodeTitle"
-                                                        v-on:click="row.node !== undefined && showInspectorNode(row.node)">{{ row.nodeName || '(no node)' }}</span>
-                                                    <code class="behaviorCode" v-bind:title="row.codeTitle">{{ row.code }}</code>
-                                                </div>
-                                            </template>
-                                        </template>
-                                        <p v-if="behaviorGroups.length === 0" class="inspectorInfo">No visibility codes match.</p>
+                                        <label class="checkbox" title="Switch off to leave the animations in their rest pose (or to scrub them by hand in the Animations tab)">
+                                            <input type="checkbox" v-bind:checked="behaviorAnimate" v-on:change="behaviorAnimateChanged.next($event.target.checked)"> Drive animations
+                                        </label>
+                                        <button class="button is-small is-rounded is-outlined" title="Set every variable back to 0"
+                                            v-on:click="behaviorVariablesReset.next(undefined)">Reset variables</button>
                                     </div>
                                 </template>
+
+                                <!-- Variables read by the codes of the open sub-tab -->
+                                <div class="behaviorSection" v-on:click="behaviorVariablesOpen = !behaviorVariablesOpen">
+                                    <span class="packageTwisty">{{ behaviorVariablesOpen ? '&#9662;' : '&#9656;' }}</span>
+                                    Variables ({{ shownBehaviorVariables.length }})
+                                </div>
+                                <template v-if="behaviorVariablesOpen">
+                                    <input class="input is-small" type="search" placeholder="Filter variables" v-model="behaviorVariableFilter">
+                                    <div class="behaviorVariables">
+                                        <div v-for="variable in shownBehaviorVariables" v-bind:key="variable.key" class="behaviorVariable"
+                                            v-bind:class="{ 'behaviorVariableFocused': behaviorFocus === variable.key, 'behaviorVariableSet': variable.value !== 0 }">
+                                            <span class="behaviorKind" v-bind:class="'behaviorKind-' + variable.kind">{{ variable.kind }}</span>
+                                            <span class="behaviorVariableName" v-bind:title="variable.title"
+                                                v-on:click="behaviorFocus = behaviorFocus === variable.key ? '' : variable.key">{{ variable.label }}<span v-if="variable.unit" class="behaviorUnit">{{ variable.unit }}</span></span>
+                                            <span class="behaviorUsers" v-bind:title="'Codes of this tab reading the variable'">{{ variable.users[behaviorSubTab] }}</span>
+                                            <input v-if="variable.boolean" type="checkbox" v-bind:checked="variable.value !== 0"
+                                                v-bind:aria-label="variable.label"
+                                                v-on:change="behaviorVariableChanged.next({ key: variable.key, value: $event.target.checked ? 1 : 0 })">
+                                            <input v-else class="input is-small behaviorNumber" type="number" step="any" v-bind:value="variable.value"
+                                                v-bind:aria-label="variable.label"
+                                                v-on:change="behaviorVariableChanged.next({ key: variable.key, value: Number($event.target.value) || 0 })">
+                                            <div v-if="!variable.boolean && variable.values.length > 0" class="behaviorValues">
+                                                <button v-for="value in variable.values" v-bind:key="value" class="behaviorValue"
+                                                    v-bind:class="{ 'is-selected': variable.value === value }"
+                                                    title="A value the codes compare this variable with"
+                                                    v-on:click="behaviorVariableChanged.next({ key: variable.key, value: value })">{{ value }}</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+
+                                <!-- Codes per attachment -->
+                                <div class="behaviorSection behaviorSectionStatic">
+                                    {{ behaviorSubTab === 'animations' ? 'Animation codes' : 'Visibility codes' }}
+                                    <span v-if="behaviorFocus" class="behaviorFocusNote">reading {{ behaviorFocusLabel }}
+                                        <a v-on:click="behaviorFocus = ''">show all</a></span>
+                                </div>
+                                <div class="behaviorToolbar">
+                                    <input class="input is-small" type="search" v-bind:placeholder="behaviorSubTab === 'animations' ? 'Filter by animation or code' : 'Filter by node or code'" v-model="behaviorFilter">
+                                    <div class="select is-small behaviorShowSelect">
+                                        <select v-model="behaviorShow" aria-label="Show">
+                                            <option value="all">All</option>
+                                            <option value="hidden">{{ behaviorSubTab === 'animations' ? 'Moving' : 'Hidden' }}</option>
+                                            <option value="shown">{{ behaviorSubTab === 'animations' ? 'At keyframe' : 'Shown' }}</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="behaviorList">
+                                    <template v-for="group in behaviorGroups" v-bind:key="group.id">
+                                        <div class="materialGroup" v-bind:title="group.title" v-on:click="toggleBehaviorGroup(group.id)">
+                                            <span class="packageTwisty">{{ behaviorCollapsed[group.id] ? '&#9656;' : '&#9662;' }}</span>
+                                            <span class="materialGroupName">{{ group.name }}</span>
+                                            <span class="materialCount">{{ group.hidden }} / {{ group.rows.length }} {{ behaviorSubTab === 'animations' ? 'moving' : 'hidden' }}</span>
+                                        </div>
+                                        <template v-if="!behaviorCollapsed[group.id]">
+                                            <div v-for="row in group.rows" v-bind:key="row.id" class="behaviorRow"
+                                                v-bind:class="'behaviorRow-' + row.state">
+                                                <span class="behaviorState" v-bind:title="row.stateTitle">{{ behaviorStateIcons[row.state] }}</span>
+                                                <span v-if="behaviorSubTab === 'animations'" class="behaviorNode" v-bind:title="row.nameTitle"
+                                                    v-on:click="row.animation !== undefined && showMsfsAnimation(row.animation)">{{ row.name }}<span class="behaviorFrame">{{ row.frameText }}</span></span>
+                                                <span v-else class="behaviorNode" v-bind:title="row.nodeTitle"
+                                                    v-on:click="row.node !== undefined && showInspectorNode(row.node)">{{ row.nodeName || '(no node)' }}</span>
+                                                <code class="behaviorCode" v-bind:title="row.codeTitle">{{ row.code }}</code>
+                                            </div>
+                                        </template>
+                                    </template>
+                                    <p v-if="behaviorGroups.length === 0" class="inspectorInfo">No codes match.</p>
+                                </div>
                             </div>
                         </b-tab-item>
 

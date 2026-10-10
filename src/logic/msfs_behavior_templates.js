@@ -1,7 +1,7 @@
 // MSFS model behavior templates: loads a model's behavior XML (with its includes from the
 // ModelBehaviorDefs folders) and expands the templates into components, like the package
-// builder does. Only what the viewer emulates is kept: components (ID, Node) and their
-// visibility codes; other outputs are counted.
+// builder does. Only what the viewer emulates is kept: components (ID, Node) with their
+// visibility codes and animations; other outputs are counted.
 //
 // Template language (as used by the SDK and Fenix templates):
 //   <Template Name> / <TemplateAlias>, <UseTemplate Name> with parameters as child elements,
@@ -265,9 +265,16 @@ class BehaviorExpander {
                 this.count(context, name);
                 return;
             }
+            case "animation": {
+                const animation = animationOf(element, scope);
+                if (animation !== undefined) {
+                    this.componentOf(context, element).animations.push(animation);
+                }
+                this.count(context, "Animation");
+                return;
+            }
             default:
-                // Animation, MouseRect, Material, Update, AnimationTriggers, InputEvent, ...:
-                // not emulated yet
+                // MouseRect, Material, Update, AnimationTriggers, InputEvent, ...: not emulated yet
                 this.count(context, element.localName);
         }
     }
@@ -279,7 +286,7 @@ class BehaviorExpander {
     /** The current component (a visibility outside of components gets an unnamed one). */
     componentOf(context) {
         if (context.component < 0) {
-            context.result.components.push({ id: "", node: "", parent: -1, visibility: [] });
+            context.result.components.push({ id: "", node: "", parent: -1, visibility: [], animations: [] });
             context.component = context.result.components.length - 1;
         }
         return context.result.components[context.component];
@@ -297,7 +304,8 @@ class BehaviorExpander {
             id: substitute(attr(element, "ID") ?? "", scope),
             node: substitute(attr(element, "Node") ?? "", scope),
             parent: context.component,
-            visibility: []
+            visibility: [],
+            animations: []
         });
         const inner = { ...context, component: components.length - 1, depth: context.depth + 1 };
         this.expandChildren(element, new Scope(scope), inner);
@@ -573,7 +581,8 @@ class BehaviorExpander {
                 id: attr(component, "ID") ?? "",
                 node: attr(component, "Node") ?? "",
                 parent: owner === null ? -1 : base + Number(owner),
-                visibility: []
+                visibility: [],
+                animations: []
             });
         }
         for (const visibility of childElements(section("VisibilityCodes") ?? root.ownerDocument.createElement("x"))) {
@@ -585,6 +594,24 @@ class BehaviorExpander {
                 component.visibility.push(text.trim());
             }
             result.outputs.Visibility = (result.outputs.Visibility ?? 0) + 1;
+        }
+        // <Animation OwnerID Name Length Type><Parameter Lag Wrap><Code StringID/></Parameter>
+        for (const animation of childElements(section("Animations") ?? root.ownerDocument.createElement("x"))) {
+            const component = result.components[base + Number(attr(animation, "OwnerID"))];
+            const parameter = childElements(animation).find((e) => lower(e) === "parameter");
+            const code = parameter?.getElementsByTagName("Code")[0];
+            const text = code ? strings.get(attr(code, "StringID") ?? "") ?? code.textContent : undefined;
+            if (component !== undefined && text !== undefined) {
+                component.animations.push({
+                    name: attr(animation, "Name") ?? "",
+                    length: Number(attr(animation, "Length")) || 100,
+                    type: attr(animation, "Type") ?? "Sim",
+                    code: text.replace(/\s+/g, " ").trim(),
+                    lag: Number(attr(parameter, "Lag")) || 0,
+                    wrap: (attr(parameter, "Wrap") ?? "").toLowerCase() === "true"
+                });
+            }
+            result.outputs.Animation = (result.outputs.Animation ?? 0) + 1;
         }
     }
 }
@@ -622,6 +649,44 @@ function codeOf(element, scope) {
         return undefined;
     }
     return substitute(code.textContent, scope).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * <Animation Name Length Type TypeParam><Parameter><Code/><Lag/><Wrap/></Parameter></Animation>
+ * or the older <Parameter><Sim><Variable/><Units/><Scale/><Bias/></Sim></Parameter> form.
+ * Returns { name, length, type, code, lag, wrap } (undefined without a parameter).
+ */
+function animationOf(element, scope) {
+    const value = (name, fallback = "") => substitute(attr(element, name) ?? fallback, scope);
+    const parameter = childElements(element).find((e) => lower(e) === "parameter");
+    if (parameter === undefined) {
+        return undefined;
+    }
+    const part = (parent, name) => childElements(parent).find((e) => lower(e) === name);
+    const text = (parent, name) => {
+        const child = part(parent, name);
+        return child === undefined ? undefined : substitute(child.textContent, scope).trim();
+    };
+    let code = text(parameter, "code");
+    const sim = part(parameter, "sim");
+    if (code === undefined && sim !== undefined) {
+        const variable = text(sim, "variable") ?? "";
+        const units = text(sim, "units") ?? "number";
+        const scale = text(sim, "scale") ?? "1";
+        const bias = text(sim, "bias") ?? "0";
+        code = `(A:${variable}, ${units}) ${scale} * ${bias} +`;
+    }
+    if (code === undefined) {
+        return undefined;
+    }
+    return {
+        name: value("Name") || value("name"),
+        length: Number(value("Length") || value("length") || "100") || 100,
+        type: value("Type") || value("type") || "Sim",
+        code: code.replace(/\s+/g, " ").trim(),
+        lag: Number(text(parameter, "lag") ?? attr(parameter, "Lag") ?? 0) || 0,
+        wrap: (text(parameter, "wrap") ?? attr(parameter, "Wrap") ?? "").toLowerCase() === "true"
+    };
 }
 
 /** A condition without True/False: its children except the Test. */

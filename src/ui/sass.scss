@@ -1995,3 +1995,14 @@ $checker: repeating-conic-gradient(#555 0% 25%, #3a3a3a 0% 50%) 50% / 12px 12px;
     flex: 0 0 auto;
     width: 5.5em !important;
 }
+.behaviorUnit {
+    margin-left: 0.4em;
+    font-size: 10px;
+    opacity: 0.5;
+}
+.behaviorFrame {
+    margin-left: 0.5em;
+    font-size: 11px;
+    opacity: 0.6;
+    font-variant-numeric: tabular-nums;
+}

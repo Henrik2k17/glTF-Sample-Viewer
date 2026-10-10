@@ -1266,6 +1266,10 @@ async function assemblePreset(preset, items, progress, livery = undefined) {
             (json.materials ?? []).forEach((material, index) => {
                 material.extras = { ...material.extras, msfsPackageItem: item.id, msfsSource: { path: gltfPath, index } };
             });
+            // the entry each animation comes from: behaviors drive the animations of their own model
+            for (const animation of json.animations ?? []) {
+                animation.extras = { ...animation.extras, msfsPackageItem: item.id };
+            }
             const roots = appendGltf(merged, json, {
                 sourcePath: files.url(gltfPath),
                 textureFolders,

@@ -115,6 +115,14 @@ function compile(code) {
     return { code, tokens, references: tokens.filter((token) => token.type === "var").map((token) => token.ref) };
 }
 
+// (F:...) functions: "value inMin inMax outMin outMax (F:MapRange)"
+const Functions = {
+    MAPRANGE: (value, inMin, inMax, outMin, outMax) => {
+        const t = inMax === inMin ? 0 : Math.min(1, Math.max(0, (value - inMin) / (inMax - inMin)));
+        return outMin + t * (outMax - outMin);
+    }
+};
+
 const truthy = (value) => (typeof value === "string" ? value !== "" : value !== 0 && !Number.isNaN(value));
 const toNumber = (value) => (typeof value === "string" ? Number(value) || 0 : value);
 
@@ -141,6 +149,18 @@ function run(program, env, maxSteps = 100000) {
             continue;
         }
         if (token.type === "var") {
+            if (token.ref.kind === "F" && !token.ref.write) {
+                // (F:Name) functions take their arguments from the stack
+                const fn = Functions[token.ref.name.toUpperCase()];
+                if (fn === undefined) {
+                    error ??= `unsupported function F:${token.ref.name}`;
+                } else {
+                    const args = [];
+                    for (let k = 0; k < fn.length; k++) args.unshift(popNumber());
+                    stack.push(fn(...args));
+                }
+                continue;
+            }
             if (token.ref.write) {
                 env.set(token.ref, pop());
             } else {

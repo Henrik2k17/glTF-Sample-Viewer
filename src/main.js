@@ -37,7 +37,7 @@ import { app } from "./ui/ui.js";
 import { EMPTY, Observable, from, merge, of } from "rxjs";
 import { mergeMap, map, share, catchError, switchMap, tap } from "rxjs/operators";
 import { fillEnvironmentWithPaths } from "./model_path_provider.js";
-import { VariableStore, buildBehaviors, evaluateVisibility } from "./logic/msfs_behavior.js";
+import { VariableStore, buildBehaviors, evaluateAnimations, evaluateVisibility } from "./logic/msfs_behavior.js";
 
 export default async () => {
     const canvas = document.getElementById("canvas");
@@ -891,16 +891,33 @@ export default async () => {
     app.packageLoadPreset.subscribe((id) => loadPreset(id));
 
     // ---------------------------------------------------------------- MSFS model behaviors
-    // Behavior tab: the behaviors of the loaded package, expanded from the templates. The
-    // visibility codes hide nodes with KHR_node_visibility, so a hidden node hides its children
-    // like in the sim. Variable values are kept across preset reloads.
-    const behavior = { data: undefined, rows: [], store: new VariableStore(), generation: 0 };
+    // Behavior tab: the behaviors of the loaded package, expanded from the templates.
+    // Visibility codes hide nodes with KHR_node_visibility, so a hidden node hides its children
+    // like in the sim. Animation codes give the keyframe each animation goes to; the animation
+    // follows it at its Lag (keyframes per second) and is shown through the frame overrides of
+    // the Animations tab. Variable values are kept across preset reloads.
+    const behavior = {
+        data: undefined,
+        rows: [], // visibility rows
+        animationRows: [],
+        store: new VariableStore(),
+        generation: 0,
+        // animation entry id -> keyframe currently shown
+        frames: new Map(),
+        lastTick: undefined,
+        lastRowsRefresh: 0
+    };
 
     async function setupBehaviors(model) {
         const generation = ++behavior.generation;
+        releaseBehaviorAnimations();
         behavior.data = undefined;
         behavior.rows = [];
+        behavior.animationRows = [];
+        behavior.frames = new Map();
+        behavior.lastTick = undefined;
         app.behaviorVisibility = [];
+        app.behaviorAnimations = [];
         app.behaviorVariables = [];
         app.behaviorProblems = [];
         app.behaviorFocus = "";
@@ -913,9 +930,10 @@ export default async () => {
         app.behaviorStatus = "Expanding the behavior templates…";
         const gltf = state.gltf;
         const nodes = gltf.nodes.map((node) => ({ name: node.name, children: node.children }));
+        const animations = gltf.animations.map((animation) => ({ name: animation.name, extras: animation.extras }));
         let data;
         try {
-            data = await buildBehaviors(preset, msfsPackage.items, nodes, (done, total) => {
+            data = await buildBehaviors(preset, msfsPackage.items, nodes, animations, (done, total) => {
                 if (generation === behavior.generation) {
                     app.behaviorStatus = `Expanding the behavior templates ${done} / ${total}…`;
                 }
@@ -932,25 +950,46 @@ export default async () => {
         }
         behavior.data = data;
         app.behaviorProblems = data.problems;
-        app.behaviorStatus = data.visibility.length === 0 ? "The behaviors of this preset have no visibility codes." : "";
-        behavior.rows = data.visibility.map((entry) => {
-            const item = msfsPackage.byId.get(entry.itemId);
-            return {
-                id: entry.id,
-                groupId: entry.itemId,
-                groupName: entry.itemName,
-                groupTitle: item?.path ?? entry.itemName,
-                node: entry.node,
-                nodeName: entry.nodeName,
-                nodeTitle: entry.node === undefined
-                    ? `${entry.nodeName}: no node with this name in ${entry.itemName}`
-                    : `${entry.nodeName} (component ${entry.componentId})\nClick: show in the Inspector`,
-                code: entry.code,
-                keys: [...new Set(entry.program.references.filter((ref) => !ref.write).map((ref) => ref.key))]
-            };
+        app.behaviorStatus =
+            data.visibility.length === 0 && data.animations.length === 0
+                ? "The behaviors of this preset have no visibility or animation codes."
+                : "";
+        const keysOf = (entry) => [
+            ...new Set(entry.program.references.filter((ref) => !ref.write && ref.kind !== "O" && ref.kind !== "F").map((ref) => ref.key))
+        ];
+        const groupOf = (entry) => ({
+            groupId: entry.itemId,
+            groupName: entry.itemName,
+            groupTitle: msfsPackage.byId.get(entry.itemId)?.path ?? entry.itemName
         });
+        behavior.rows = data.visibility.map((entry) => ({
+            id: entry.id,
+            ...groupOf(entry),
+            node: entry.node,
+            nodeName: entry.nodeName,
+            label: entry.nodeName,
+            nodeTitle: entry.node === undefined
+                ? `${entry.nodeName}: no node with this name in ${entry.itemName}`
+                : `${entry.nodeName} (component ${entry.componentId})\nClick: show in the Inspector`,
+            code: entry.code,
+            keys: keysOf(entry)
+        }));
+        behavior.animationRows = data.animations.map((entry) => ({
+            id: entry.id,
+            ...groupOf(entry),
+            animation: entry.animation,
+            name: entry.name,
+            label: entry.name,
+            nameTitle: entry.animation === undefined
+                ? `${entry.name}: no glTF animation with this name in ${entry.itemName}`
+                : `${entry.name} (component ${entry.componentId}), length ${entry.length}, lag ${entry.lag}${entry.wrap ? ", wraps" : ""}\nClick: show in the Animations tab`,
+            length: entry.length,
+            code: entry.code,
+            keys: keysOf(entry)
+        }));
         refreshBehaviorVariables();
         applyBehaviorVisibility();
+        applyBehaviorAnimations(true);
     }
 
     function refreshBehaviorVariables() {
@@ -959,23 +998,26 @@ export default async () => {
             app.behaviorVariables = [];
             return;
         }
+        const count = (n, what) => `${n} ${what}${n === 1 ? "" : "s"}`;
         app.behaviorVariables = data.variables.map((variable) => {
             const label = variable.index !== "" ? `${variable.name}:${variable.index}` : variable.name;
             const reference = `(${variable.kind}:${label}${variable.unit ? ", " + variable.unit : ""})`;
-            const users = variable.users.length;
+            const visibilityUsers = variable.users.visibility.length;
+            const animationUsers = variable.users.animations.length;
             return {
                 key: variable.key,
                 kind: variable.kind,
+                unit: variable.unit,
                 label,
                 title: [
                     reference,
-                    `Read by ${users} visibility code${users === 1 ? "" : "s"} (click: list them)`,
+                    `Read by ${count(visibilityUsers, "visibility code")} and ${count(animationUsers, "animation")} (click: list them)`,
                     variable.values.length > 0 ? `Compared with ${variable.values.join(", ")}` : undefined
                 ].filter((line) => line).join("\n"),
-                users,
+                users: { visibility: visibilityUsers, animations: animationUsers },
                 boolean: variable.boolean,
                 values: variable.values,
-                value: Number(behavior.store.valueOf(variable.key)) || 0
+                value: Number(behavior.store.valueOf(variable.key, variable.unit)) || 0
             };
         });
     }
@@ -1030,21 +1072,194 @@ export default async () => {
         redraw = true;
     }
 
+    // ---- animations
+
+    const behaviorAnimationEntry = (index) => app.msfsAnimations.find((entry) => entry.index === index);
+
+    /**
+     * Evaluates the animation codes (all of them, or only the ones reading the clock) and moves
+     * the animations: at once when instant (first evaluation, or no lag), else at their lag in
+     * tickBehaviorAnimations.
+     */
+    function applyBehaviorAnimations(instant, entries = undefined) {
+        const data = behavior.data;
+        if (data === undefined) {
+            return;
+        }
+        evaluateAnimations(data, behavior.store, entries ?? data.animations);
+        if (instant || entries === undefined) {
+            for (const entry of entries ?? data.animations) {
+                if (instant || entry.lag <= 0 || !behavior.frames.has(entry.id)) {
+                    behavior.frames.set(entry.id, entry.target);
+                }
+            }
+            showBehaviorFrames(entries ?? data.animations);
+        }
+        refreshBehaviorAnimationRows(true);
+    }
+
+    /** Sets the frames of the glTF animations the entries drive (frame overrides of the Animations tab). */
+    function showBehaviorFrames(entries) {
+        if (!app.behaviorAnimate || behavior.data === undefined) {
+            return;
+        }
+        const indices = new Set(state.animationIndices);
+        let added = false;
+        for (const entry of entries) {
+            if (entry.animation === undefined) {
+                continue;
+            }
+            const frame = behavior.frames.get(entry.id) ?? 0;
+            const panelEntry = behaviorAnimationEntry(entry.animation);
+            if (panelEntry !== undefined) {
+                panelEntry.frame = frame;
+                panelEntry.active = true;
+            }
+            state.animationTimeOverrides.set(entry.animation, frame / app.msfsFrameRate);
+            if (!indices.has(entry.animation)) {
+                indices.add(entry.animation);
+                added = true;
+            }
+        }
+        if (added) {
+            state.animationIndices = [...indices];
+        }
+        redraw = true;
+    }
+
+    /** Back to the rest pose for every animation the behaviors drove. */
+    function releaseBehaviorAnimations() {
+        const data = behavior.data;
+        if (data === undefined || state.gltf === undefined) {
+            return;
+        }
+        const driven = new Set(data.animations.map((entry) => entry.animation).filter((index) => index !== undefined));
+        for (const index of driven) {
+            state.animationTimeOverrides.delete(index);
+            const panelEntry = behaviorAnimationEntry(index);
+            if (panelEntry !== undefined) {
+                panelEntry.active = false;
+                panelEntry.frame = panelEntry.minFrame;
+            }
+        }
+        state.animationIndices = state.animationIndices.filter((index) => !driven.has(index));
+        redraw = true;
+    }
+
+    /** Per frame: the clock, codes that read it, and animations moving at their lag. */
+    function tickBehaviorAnimations() {
+        const data = behavior.data;
+        const now = performance.now();
+        const deltaTime = behavior.lastTick === undefined ? 0 : Math.min(0.25, (now - behavior.lastTick) / 1000);
+        behavior.lastTick = now;
+        if (data === undefined || !app.behaviorAnimate || data.animations.length === 0) {
+            return false;
+        }
+        behavior.store.deltaTime = deltaTime;
+        behavior.store.time += deltaTime;
+        const clocked = data.animations.filter((entry) => entry.timeDependent);
+        if (clocked.length > 0) {
+            evaluateAnimations(data, behavior.store, clocked);
+        }
+        const moved = [];
+        for (const entry of data.animations) {
+            const frame = behavior.frames.get(entry.id) ?? entry.target;
+            if (frame === entry.target || entry.target === undefined) {
+                continue;
+            }
+            let next = entry.target;
+            if (entry.lag > 0 && !entry.timeDependent) {
+                const step = entry.lag * deltaTime;
+                let distance = entry.target - frame;
+                if (entry.wrap && Math.abs(distance) > entry.length / 2) {
+                    // the short way round
+                    distance -= Math.sign(distance) * entry.length;
+                }
+                next = Math.abs(distance) <= step ? entry.target : frame + Math.sign(distance) * step;
+                if (entry.wrap) {
+                    next = ((next % entry.length) + entry.length) % entry.length;
+                }
+            }
+            behavior.frames.set(entry.id, next);
+            moved.push(entry);
+        }
+        if (moved.length === 0) {
+            return false;
+        }
+        showBehaviorFrames(moved);
+        // throttled while moving; the step that ends a movement always shows (codes reading the
+        // clock change every frame and only refresh throttled)
+        const lagged = moved.filter((entry) => !entry.timeDependent);
+        const arrived = lagged.length > 0 && lagged.every((entry) => behavior.frames.get(entry.id) === entry.target);
+        refreshBehaviorAnimationRows(arrived);
+        return true;
+    }
+
+    /** The Animations sub-tab rows (throttled while animations move). */
+    function refreshBehaviorAnimationRows(force) {
+        const data = behavior.data;
+        if (data === undefined) {
+            app.behaviorAnimations = [];
+            return;
+        }
+        const now = performance.now();
+        if (!force && (now - behavior.lastRowsRefresh < 250 || app.behaviorSubTab !== "animations")) {
+            return;
+        }
+        behavior.lastRowsRefresh = now;
+        const format = (value) => (Number.isInteger(value) ? String(value) : value.toFixed(1));
+        app.behaviorAnimations = behavior.animationRows.map((row) => {
+            const entry = data.animations[row.id];
+            const frame = behavior.frames.get(entry.id) ?? entry.target ?? 0;
+            let rowState = "shown";
+            let stateTitle = "At the keyframe of its code";
+            if (entry.animation === undefined) {
+                rowState = "missing";
+                stateTitle = "No glTF animation with this name, the code has no effect";
+            } else if (!app.behaviorAnimate) {
+                rowState = "hidden";
+                stateTitle = "Not applied (Drive animations is off)";
+            } else if (Math.abs(frame - entry.target) > 1e-6) {
+                rowState = "parent";
+                stateTitle = `Moving to keyframe ${format(entry.target)} (lag ${entry.lag})`;
+            }
+            return {
+                ...row,
+                state: rowState,
+                stateTitle,
+                frameText: `${format(frame)} / ${row.length}`,
+                codeTitle: `${entry.code}\n= ${entry.value}${entry.error ? "\n⚠ " + entry.error : ""}`
+            };
+        });
+    }
+
+    app.$watch("behaviorSubTab", () => refreshBehaviorAnimationRows(true));
+
     app.behaviorVariableChanged.subscribe(({ key, value }) => {
-        behavior.store.setKey(key, value);
-        app.behaviorVariables = app.behaviorVariables.map((variable) =>
-            variable.key === key ? { ...variable, value } : variable
-        );
+        const variable = app.behaviorVariables.find((entry) => entry.key === key);
+        behavior.store.setKey(key, value, variable?.unit ?? "");
+        app.behaviorVariables = app.behaviorVariables.map((entry) => (entry.key === key ? { ...entry, value } : entry));
         applyBehaviorVisibility();
+        applyBehaviorAnimations(false);
     });
     app.behaviorApplyChanged.subscribe((apply) => {
         app.behaviorApply = apply;
         applyBehaviorVisibility();
     });
+    app.behaviorAnimateChanged.subscribe((animate) => {
+        app.behaviorAnimate = animate;
+        if (animate) {
+            applyBehaviorAnimations(true);
+        } else {
+            releaseBehaviorAnimations();
+            refreshBehaviorAnimationRows(true);
+        }
+    });
     app.behaviorVariablesReset.subscribe(() => {
         behavior.store.values.clear();
         refreshBehaviorVariables();
         applyBehaviorVisibility();
+        applyBehaviorAnimations(false);
     });
     // a different livery reloads the shown preset with it
     app.packageLiveryChanged.subscribe((id) => {
@@ -1943,6 +2158,7 @@ export default async () => {
 
         redraw |= dragSmoother.tick();
         redraw |= advanceMsfsAnimations();
+        redraw |= tickBehaviorAnimations();
 
         // set the size of the drawingBuffer based on the size it's displayed.
         canvas.width = Math.floor(canvas.clientWidth * devicePixelRatio);

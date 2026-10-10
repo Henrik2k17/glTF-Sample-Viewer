@@ -203,11 +203,14 @@ const appCreated = createApp({
             behaviorSubTab: "visibility",
             behaviorStatus: "",
             behaviorProblems: [],
-            // rows: { id, groupId, groupName, groupTitle, node, nodeName, code, keys, state, error }
+            // rows: { id, groupId, groupName, groupTitle, label, node, nodeName, code, keys, state }
             behaviorVisibility: [],
-            // rows: { key, kind, label, title, users, boolean, values, value }
+            // rows: { id, groupId, groupName, groupTitle, label, animation, name, frameText, code, keys, state }
+            behaviorAnimations: [],
+            // rows: { key, kind, unit, label, title, users: { visibility, animations }, boolean, values, value }
             behaviorVariables: [],
             behaviorApply: true,
+            behaviorAnimate: true, // animation codes drive the animations
             behaviorVariablesOpen: true,
             behaviorVariableFilter: "",
             behaviorFilter: "",
@@ -217,6 +220,7 @@ const appCreated = createApp({
             behaviorStateIcons: { shown: "●", hidden: "○", parent: "◐", missing: "⚠" },
             behaviorVariableChanged: new Subject(),
             behaviorApplyChanged: new Subject(),
+            behaviorAnimateChanged: new Subject(),
             behaviorVariablesReset: new Subject(),
             // Texture lookup folders (logic/texture_folders.js rows)
             textureFoldersSupported: true,
@@ -496,21 +500,33 @@ const appCreated = createApp({
         behaviorHiddenCount() {
             return this.behaviorVisibility.filter((row) => row.state === "hidden" || row.state === "parent").length;
         },
+        behaviorAnimationCounts() {
+            const rows = this.behaviorAnimations;
+            return {
+                bound: rows.filter((row) => row.state !== "missing").length,
+                moving: rows.filter((row) => row.state === "parent").length,
+                missing: rows.filter((row) => row.state === "missing").length
+            };
+        },
+        // the variables read by the codes of the open sub-tab
         shownBehaviorVariables() {
             const filter = this.behaviorVariableFilter.trim().toLowerCase();
-            return filter === ""
-                ? this.behaviorVariables
-                : this.behaviorVariables.filter((variable) => variable.key.toLowerCase().includes(filter));
+            return this.behaviorVariables.filter(
+                (variable) =>
+                    variable.users[this.behaviorSubTab] > 0 && (filter === "" || variable.key.toLowerCase().includes(filter))
+            );
         },
         behaviorFocusLabel() {
             return this.behaviorVariables.find((variable) => variable.key === this.behaviorFocus)?.label ?? this.behaviorFocus;
         },
-        // visibility rows after the filters, grouped by the attachment they come from
+        // rows of the open sub-tab after the filters, grouped by the attachment they come from.
+        // "hidden" counts hidden parts (visibility) or animations not at their keyframe yet.
         behaviorGroups() {
             const filter = this.behaviorFilter.trim().toLowerCase();
             const groups = [];
             const byId = new Map();
-            for (const row of this.behaviorVisibility) {
+            const rows = this.behaviorSubTab === "animations" ? this.behaviorAnimations : this.behaviorVisibility;
+            for (const row of rows) {
                 if (this.behaviorFocus !== "" && !row.keys.includes(this.behaviorFocus)) {
                     continue;
                 }
@@ -520,7 +536,7 @@ const appCreated = createApp({
                 if (this.behaviorShow === "shown" && row.state !== "shown") {
                     continue;
                 }
-                if (filter !== "" && !row.nodeName.toLowerCase().includes(filter) && !row.code.toLowerCase().includes(filter)) {
+                if (filter !== "" && !row.label.toLowerCase().includes(filter) && !row.code.toLowerCase().includes(filter)) {
                     continue;
                 }
                 let group = byId.get(row.groupId);
@@ -772,6 +788,10 @@ const appCreated = createApp({
         // 3 significant digits, no trailing zeros
         formatEmissiveMultiplier(value) {
             return Number(value.toPrecision(3));
+        },
+        showMsfsAnimation(index) {
+            this.showTab(AnimationsTab);
+            this.msfsAnimationSelectionChanged.next([index]);
         },
         toggleBehaviorGroup(id) {
             this.behaviorCollapsed = { ...this.behaviorCollapsed, [id]: !this.behaviorCollapsed[id] };
