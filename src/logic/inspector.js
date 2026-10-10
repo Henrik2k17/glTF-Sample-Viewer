@@ -13,9 +13,9 @@ const MsfsMeshObjectExtensions = {
 // to show in a viewer.
 const MsfsMaterialSupport = {
     ASOBO_material_UV_options: ["as Max", "tiling, offset, rotation; clamp as clamp-to-edge"],
-    ASOBO_material_detail_map: ["as Max", "color, normal, blend mask; metal/rough/AO map only in debug channels (unused in Max)"],
+    ASOBO_material_detail_map: ["as Max", "color, normal, blend mask; metal/rough/AO map added around 0.5 as the SDK documents it (unused in Max)"],
     ASOBO_occlusion_strength: ["as Max", ""],
-    ASOBO_extra_occlusion: ["as Max", ""],
+    ASOBO_extra_occlusion: ["as Max", "compiled packages: sqrt-encoded map in both occlusion slots, squared once"],
     ASOBO_material_pearlescent: ["as Max", ""],
     ASOBO_material_dirt: ["as Max", "roughness/metal read from G/B, not alpha"],
     ASOBO_material_tire: ["as Max", "mud cutout and mud normal unused (as in Max)"],
