@@ -1811,3 +1811,165 @@ $checker: repeating-conic-gradient(#555 0% 25%, #3a3a3a 0% 50%) 50% / 12px 12px;
 .maxSlot.maxEdited {
     border-color: #87c540;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Behavior tab (MSFS model behaviors): variables and visibility codes
+.behaviorSubTabs {
+    margin-bottom: 0.5em;
+}
+.behaviorToolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    margin: 0.5em 0;
+    font-size: 13px;
+    .input { flex: 1; min-width: 0; }
+    .checkbox { flex: 1; }
+}
+.tabContent .behaviorToolbar .select.behaviorShowSelect,
+.tabContent .behaviorToolbar .select.behaviorShowSelect select {
+    // next to the filter box, not full width like the other dropdowns
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 6.5em;
+}
+.behaviorSection {
+    display: flex;
+    align-items: center;
+    gap: 0.35em;
+    margin-top: 1em;
+    padding-bottom: 2px;
+    border-bottom: 1px solid #3a3a3a;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.85;
+    cursor: pointer;
+}
+.behaviorSectionStatic {
+    cursor: default;
+}
+.behaviorFocusNote {
+    // long variable names wrap instead of widening the panel
+    contain: inline-size;
+    flex: 1 1 0;
+    text-align: right;
+    font-weight: normal;
+    text-transform: none;
+    letter-spacing: normal;
+    a { margin-left: 0.35em; }
+}
+.behaviorProblem {
+    font-size: 11px;
+    opacity: 0.8;
+    word-break: break-word;
+}
+.behaviorVariables {
+    max-height: 22em;
+    overflow-y: auto;
+    margin-top: 0.25em;
+}
+.behaviorVariable {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4em;
+    padding: 2px 4px;
+    font-size: 12px;
+    border-radius: 3px;
+    &:hover { background: #3a3a3a; }
+    input[type="checkbox"] { flex: 0 0 auto; }
+}
+.behaviorVariableFocused {
+    background: #3f4a33;
+}
+.behaviorVariableSet .behaviorVariableName {
+    color: #b7e07f;
+}
+.behaviorKind {
+    flex: 0 0 auto;
+    width: 16px;
+    text-align: center;
+    font-size: 10px;
+    line-height: 14px;
+    border-radius: 3px;
+    background: #3d3d3d;
+}
+.behaviorKind-A { background: #2f4a63; }
+.behaviorKind-E { background: #5a4a2a; }
+.behaviorVariableName {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.behaviorUsers {
+    flex: 0 0 auto;
+    font-size: 11px;
+    opacity: 0.55;
+}
+.behaviorNumber {
+    flex: 0 0 auto;
+    width: 5.5em !important;
+    height: 1.8em;
+}
+.behaviorValues {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    padding-left: 22px;
+}
+.behaviorValue {
+    font-size: 11px;
+    line-height: 16px;
+    padding: 0 6px;
+    border: 1px solid #5a5a5a;
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    &.is-selected { border-color: #87c540; color: #b7e07f; }
+}
+.behaviorList {
+    margin-bottom: 2em;
+}
+.behaviorRow {
+    display: grid;
+    grid-template-columns: 14px auto;
+    column-gap: 0.4em;
+    padding: 2px 4px 2px 18px;
+    font-size: 12px;
+    border-radius: 3px;
+    &:hover { background: #3a3a3a; }
+}
+.behaviorState {
+    grid-row: span 2;
+    text-align: center;
+}
+.behaviorRow-shown .behaviorState { color: #87c540; }
+.behaviorRow-hidden .behaviorState { color: #9a9a9a; }
+.behaviorRow-parent .behaviorState { color: #d0a050; }
+.behaviorRow-missing .behaviorState { color: #e06c5a; }
+.behaviorRow-hidden .behaviorNode, .behaviorRow-parent .behaviorNode { opacity: 0.6; }
+.behaviorNode {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.behaviorCode {
+    // codes can be long: cut with an ellipsis (full code in the tooltip), never widen the panel
+    contain: inline-size;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    padding: 0;
+    background: transparent;
+    color: #9fb8d0;
+}

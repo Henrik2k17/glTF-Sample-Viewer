@@ -3,7 +3,7 @@ import { Subject } from "rxjs";
 import "./sass.scss";
 import Buefy from "@ntohq/buefy-next";
 
-// collapseActiveTab ids of the Animations, Inspector and Materials tabs (index.html)
+// collapseActiveTab ids of the Animations, Inspector and Materials tabs (index.html; Behavior is 9)
 const AnimationsTab = 3;
 const InspectorTab = 7;
 const MaterialsTab = 8;
@@ -193,6 +193,26 @@ const appCreated = createApp({
                 channelHints: {},
                 pixel: ""
             },
+            // Behavior tab (logic/msfs_behavior.js, filled by main.js)
+            behaviorAvailable: false,
+            behaviorSubTab: "visibility",
+            behaviorStatus: "",
+            behaviorProblems: [],
+            // rows: { id, groupId, groupName, groupTitle, node, nodeName, code, keys, state, error }
+            behaviorVisibility: [],
+            // rows: { key, kind, label, title, users, boolean, values, value }
+            behaviorVariables: [],
+            behaviorApply: true,
+            behaviorVariablesOpen: true,
+            behaviorVariableFilter: "",
+            behaviorFilter: "",
+            behaviorShow: "all",
+            behaviorFocus: "", // variable key: list only the codes reading it
+            behaviorCollapsed: {},
+            behaviorStateIcons: { shown: "●", hidden: "○", parent: "◐", missing: "⚠" },
+            behaviorVariableChanged: new Subject(),
+            behaviorApplyChanged: new Subject(),
+            behaviorVariablesReset: new Subject(),
             // Texture lookup folders (logic/texture_folders.js rows)
             textureFoldersSupported: true,
             textureFolders: [],
@@ -468,6 +488,49 @@ const appCreated = createApp({
             const entry = entries[0];
             return entry.maxFrame > entry.minFrame ? (entry.frame - entry.minFrame) / (entry.maxFrame - entry.minFrame) : 0;
         },
+        behaviorHiddenCount() {
+            return this.behaviorVisibility.filter((row) => row.state === "hidden" || row.state === "parent").length;
+        },
+        shownBehaviorVariables() {
+            const filter = this.behaviorVariableFilter.trim().toLowerCase();
+            return filter === ""
+                ? this.behaviorVariables
+                : this.behaviorVariables.filter((variable) => variable.key.toLowerCase().includes(filter));
+        },
+        behaviorFocusLabel() {
+            return this.behaviorVariables.find((variable) => variable.key === this.behaviorFocus)?.label ?? this.behaviorFocus;
+        },
+        // visibility rows after the filters, grouped by the attachment they come from
+        behaviorGroups() {
+            const filter = this.behaviorFilter.trim().toLowerCase();
+            const groups = [];
+            const byId = new Map();
+            for (const row of this.behaviorVisibility) {
+                if (this.behaviorFocus !== "" && !row.keys.includes(this.behaviorFocus)) {
+                    continue;
+                }
+                if (this.behaviorShow === "hidden" && row.state !== "hidden" && row.state !== "parent") {
+                    continue;
+                }
+                if (this.behaviorShow === "shown" && row.state !== "shown") {
+                    continue;
+                }
+                if (filter !== "" && !row.nodeName.toLowerCase().includes(filter) && !row.code.toLowerCase().includes(filter)) {
+                    continue;
+                }
+                let group = byId.get(row.groupId);
+                if (group === undefined) {
+                    group = { id: row.groupId, name: row.groupName, title: row.groupTitle, rows: [], hidden: 0 };
+                    byId.set(row.groupId, group);
+                    groups.push(group);
+                }
+                group.rows.push(row);
+                if (row.state === "hidden" || row.state === "parent") {
+                    group.hidden++;
+                }
+            }
+            return groups;
+        },
         msfsDockPlaying() {
             return this.selectedMsfsAnimations.some((entry) => entry.playing);
         }
@@ -700,6 +763,9 @@ const appCreated = createApp({
         showMaterial(index) {
             this.showTab(MaterialsTab);
             this.materialSelectionChanged.next(index);
+        },
+        toggleBehaviorGroup(id) {
+            this.behaviorCollapsed = { ...this.behaviorCollapsed, [id]: !this.behaviorCollapsed[id] };
         },
         showInspectorNode(index) {
             this.showTab(InspectorTab);

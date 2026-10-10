@@ -37,6 +37,7 @@ import { app } from "./ui/ui.js";
 import { EMPTY, Observable, from, merge, of } from "rxjs";
 import { mergeMap, map, share, catchError, switchMap, tap } from "rxjs/operators";
 import { fillEnvironmentWithPaths } from "./model_path_provider.js";
+import { VariableStore, buildBehaviors, evaluateVisibility } from "./logic/msfs_behavior.js";
 
 export default async () => {
     const canvas = document.getElementById("canvas");
@@ -202,6 +203,7 @@ export default async () => {
         state.animationTimeOverrides.clear();
         setupInspector(emptyGltf, 0);
         setupMaterials(emptyGltf);
+        setupBehaviors(undefined);
         app.msfsAnimationMode = false;
         app.msfsAnimations = [];
         selectMsfsAnimations([]);
@@ -293,6 +295,7 @@ export default async () => {
                         setupMaterials(gltf);
                         refreshValidationSummary();
                         setupPackageTree(model);
+                        setupBehaviors(model);
 
                         uiModel.exitLoadingState();
 
@@ -310,6 +313,7 @@ export default async () => {
                         setupMaterials(emptyGltf);
                         refreshValidationSummary();
                         setupPackageTree(undefined);
+                        setupBehaviors(undefined);
                         if (model.package) {
                             app.packageError = `Loading the assembled model failed: ${error}`;
                         }
@@ -838,9 +842,7 @@ export default async () => {
             };
         });
         refreshShownMaterials();
-        if (!state.renderingParameters.enabledExtensions.KHR_node_visibility) {
-            app.warn("Enable KHR_node_visibility (Advanced Controls) to hide attachments.");
-        }
+        applyBehaviorVisibility(); // "hidden by a node above" states
         redraw = true;
     });
     app.packageAttachmentSelected.subscribe((id) => {
@@ -850,6 +852,163 @@ export default async () => {
         }
     });
     app.packageLoadPreset.subscribe((id) => loadPreset(id));
+
+    // ---------------------------------------------------------------- MSFS model behaviors
+    // Behavior tab: the behaviors of the loaded package, expanded from the templates. The
+    // visibility codes hide nodes with KHR_node_visibility, so a hidden node hides its children
+    // like in the sim. Variable values are kept across preset reloads.
+    const behavior = { data: undefined, rows: [], store: new VariableStore(), generation: 0 };
+
+    async function setupBehaviors(model) {
+        const generation = ++behavior.generation;
+        behavior.data = undefined;
+        behavior.rows = [];
+        app.behaviorVisibility = [];
+        app.behaviorVariables = [];
+        app.behaviorProblems = [];
+        app.behaviorFocus = "";
+        const preset = model?.package ? msfsPackage.presets.find((entry) => entry.id === model.presetId) : undefined;
+        app.behaviorAvailable = preset !== undefined;
+        if (preset === undefined) {
+            app.behaviorStatus = "";
+            return;
+        }
+        app.behaviorStatus = "Expanding the behavior templates…";
+        const gltf = state.gltf;
+        const nodes = gltf.nodes.map((node) => ({ name: node.name, children: node.children }));
+        let data;
+        try {
+            data = await buildBehaviors(preset, msfsPackage.items, nodes, (done, total) => {
+                if (generation === behavior.generation) {
+                    app.behaviorStatus = `Expanding the behavior templates ${done} / ${total}…`;
+                }
+            });
+        } catch (error) {
+            console.error("Expanding the behaviors failed", error);
+            if (generation === behavior.generation) {
+                app.behaviorStatus = `Expanding the behaviors failed: ${error.message}`;
+            }
+            return;
+        }
+        if (generation !== behavior.generation || state.gltf !== gltf) {
+            return;
+        }
+        behavior.data = data;
+        app.behaviorProblems = data.problems;
+        app.behaviorStatus = data.visibility.length === 0 ? "The behaviors of this preset have no visibility codes." : "";
+        behavior.rows = data.visibility.map((entry) => {
+            const item = msfsPackage.byId.get(entry.itemId);
+            return {
+                id: entry.id,
+                groupId: entry.itemId,
+                groupName: entry.itemName,
+                groupTitle: item?.path ?? entry.itemName,
+                node: entry.node,
+                nodeName: entry.nodeName,
+                nodeTitle: entry.node === undefined
+                    ? `${entry.nodeName}: no node with this name in ${entry.itemName}`
+                    : `${entry.nodeName} (component ${entry.componentId})\nClick: show in the Inspector`,
+                code: entry.code,
+                keys: [...new Set(entry.program.references.filter((ref) => !ref.write).map((ref) => ref.key))]
+            };
+        });
+        refreshBehaviorVariables();
+        applyBehaviorVisibility();
+    }
+
+    function refreshBehaviorVariables() {
+        const data = behavior.data;
+        if (data === undefined) {
+            app.behaviorVariables = [];
+            return;
+        }
+        app.behaviorVariables = data.variables.map((variable) => {
+            const label = variable.index !== "" ? `${variable.name}:${variable.index}` : variable.name;
+            const reference = `(${variable.kind}:${label}${variable.unit ? ", " + variable.unit : ""})`;
+            const users = variable.users.length;
+            return {
+                key: variable.key,
+                kind: variable.kind,
+                label,
+                title: [
+                    reference,
+                    `Read by ${users} visibility code${users === 1 ? "" : "s"} (click: list them)`,
+                    variable.values.length > 0 ? `Compared with ${variable.values.join(", ")}` : undefined
+                ].filter((line) => line).join("\n"),
+                users,
+                boolean: variable.boolean,
+                values: variable.values,
+                value: Number(behavior.store.valueOf(variable.key)) || 0
+            };
+        });
+    }
+
+    /** Evaluates the visibility codes and shows / hides their nodes. */
+    function applyBehaviorVisibility() {
+        const data = behavior.data;
+        if (data === undefined || state.gltf === undefined) {
+            return;
+        }
+        const results = evaluateVisibility(data, behavior.store);
+        for (const [nodeIndex, visible] of results) {
+            const node = state.gltf.nodes[nodeIndex];
+            if (node === undefined) {
+                continue;
+            }
+            node.extensions ??= {};
+            node.extensions.KHR_node_visibility ??= { visible: true };
+            node.extensions.KHR_node_visibility.visible = app.behaviorApply ? visible : true;
+        }
+        // hidden by a node above it (another code, or an attachment switched off in the Models tab)
+        const hiddenAbove = (nodeIndex) => {
+            for (let node = msfsPackage.parents.get(nodeIndex); node !== undefined; node = msfsPackage.parents.get(node)) {
+                if (state.gltf.nodes[node]?.extensions?.KHR_node_visibility?.visible === false) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        app.behaviorVisibility = behavior.rows.map((row) => {
+            const entry = data.visibility[row.id];
+            let rowState = "shown";
+            let stateTitle = "Shown: the code is not 0";
+            if (entry.node === undefined) {
+                rowState = "missing";
+                stateTitle = "The node was not found, the code has no effect";
+            } else if (!entry.visible) {
+                rowState = "hidden";
+                stateTitle = app.behaviorApply ? "Hidden: the code is 0" : "The code is 0 (not applied)";
+            } else if (hiddenAbove(entry.node)) {
+                rowState = "parent";
+                stateTitle = "The code is not 0, but a node above it is hidden";
+            }
+            return {
+                ...row,
+                state: rowState,
+                stateTitle,
+                codeTitle: `${entry.code}\n= ${entry.value}${entry.error ? "\n⚠ " + entry.error : ""}`
+            };
+        });
+        refreshShownMaterials();
+        redraw = true;
+    }
+
+    app.behaviorVariableChanged.subscribe(({ key, value }) => {
+        behavior.store.setKey(key, value);
+        app.behaviorVariables = app.behaviorVariables.map((variable) =>
+            variable.key === key ? { ...variable, value } : variable
+        );
+        applyBehaviorVisibility();
+    });
+    app.behaviorApplyChanged.subscribe((apply) => {
+        app.behaviorApply = apply;
+        applyBehaviorVisibility();
+    });
+    app.behaviorVariablesReset.subscribe(() => {
+        behavior.store.values.clear();
+        refreshBehaviorVariables();
+        applyBehaviorVisibility();
+    });
     // a different livery reloads the shown preset with it
     app.packageLiveryChanged.subscribe((id) => {
         app.selectedPackageLivery = id;
