@@ -445,6 +445,12 @@ async function readModelXml(files, xmlPath, depth = 0) {
     return gltfs;
 }
 
+/** tag.N values of an attachment.cfg [Tags] section. */
+const tagsOf = (cfg) =>
+    [...(cfg?.get("tags") ?? new Map()).entries()]
+        .filter(([key, value]) => key.startsWith("tag") && value !== "")
+        .map(([, value]) => value);
+
 const parseVector = (value, fallback) => {
     const numbers = (value ?? "").split(",").map((part) => Number(part.trim()));
     return numbers.length === 3 && numbers.every(Number.isFinite) ? numbers : fallback;
@@ -566,15 +572,18 @@ async function buildPresetTree(preset) {
             // attachment.cfg: tags, and [inherit] base = another attachment whose attached objects apply too
             const cfgPaths = [root + "/config/attached_objects.cfg"];
             const attachmentCfg = await readCfg(files, root + "/attachment.cfg").catch(() => undefined);
-            for (const [key, value] of attachmentCfg?.get("tags") ?? []) {
-                if (key.startsWith("tag")) {
-                    item.tags.push(value);
-                }
-            }
+            item.tags.push(...tagsOf(attachmentCfg));
             const base = attachmentCfg?.get("inherit")?.get("base");
             if (base) {
                 item.inherits = normalizePath(base);
                 cfgPaths.unshift(normalizePath(base) + "/config/attached_objects.cfg");
+                // the base's tags apply too (livery required_tags and model.<tag> / texture.<tag> folders)
+                const baseCfg = await readCfg(files, item.inherits + "/attachment.cfg").catch(() => undefined);
+                for (const tag of tagsOf(baseCfg)) {
+                    if (!item.tags.some((other) => other.toLowerCase() === tag.toLowerCase())) {
+                        item.tags.push(tag);
+                    }
+                }
             }
             item.children = await readAttachedObjects(cfgPaths, [...stack, root.toLowerCase()]);
         }
@@ -583,6 +592,88 @@ async function buildPresetTree(preset) {
 
     items.push(...(await readAttachedObjects([preset.folder + "config/attached_objects.cfg"], [])));
     return items;
+}
+
+/**
+ * livery.cfg [EDITABLE_COLORS]: editable_color.N = color: R, G, B #materials: "tag:name", ...
+ * #fallback: N. Returns [{ color: [r, g, b] (0-255), materials: [{ name, tag, alias }] }].
+ */
+function parseEditableColors(section) {
+    const colors = [];
+    for (const [key, value] of section ?? []) {
+        const index = /^editable_color\.(\d+)$/.exec(key)?.[1];
+        if (index === undefined) {
+            continue;
+        }
+        const entry = { index: Number(index), color: undefined, materials: [] };
+        for (const part of value.split("#")) {
+            const colon = part.indexOf(":");
+            if (colon < 0) {
+                continue;
+            }
+            const name = part.substring(0, colon).trim().toLowerCase();
+            const rest = part.substring(colon + 1);
+            if (name === "color") {
+                const rgb = rest.split(",").map((component) => Number(component.trim()));
+                if (rgb.length === 3 && rgb.every(Number.isFinite)) {
+                    entry.color = rgb;
+                }
+            } else if (name === "materials") {
+                for (const quoted of rest.match(/"[^"]*"/g) ?? []) {
+                    const text = quoted.slice(1, -1).trim();
+                    if (text === "" || /^no_?material$/i.test(text)) {
+                        continue;
+                    }
+                    const at = text.indexOf("@");
+                    const tagEnd = text.indexOf(":");
+                    entry.materials.push({
+                        tag: tagEnd >= 0 ? text.substring(0, tagEnd) : undefined,
+                        name: text.substring(tagEnd + 1, at >= 0 ? at : undefined),
+                        alias: at >= 0 ? text.substring(at + 1) : undefined
+                    });
+                }
+            }
+        }
+        if (entry.color !== undefined) {
+            colors.push(entry);
+        }
+    }
+    return colors.sort((a, b) => a.index - b.index);
+}
+
+/**
+ * The liveries of a preset's SimObject (liveries/<author>/<livery>/livery.cfg). A livery is
+ * available when all its [Selection] required_tags are tags of the preset's attachments
+ * (attachment.cfg [Tags]); A32X base liveries use "Disabled" to never match.
+ * @returns {Promise<object[]>} { id, folder, title, requiredTags, missingTags, available }
+ */
+async function findLiveries(preset, items) {
+    const files = preset.files;
+    const tags = new Set(flattenTree(items).flatMap(({ item }) => item.tags ?? []).map((tag) => tag.toLowerCase()));
+    const liveries = [];
+    for (const path of files.list(preset.simObject + "/liveries")) {
+        const match = /\/liveries\/([^/]+)\/([^/]+)\/livery\.cfg$/i.exec(path);
+        if (match === null) {
+            continue;
+        }
+        const cfg = await readCfg(files, path).catch(() => undefined);
+        const requiredTags = (cfg?.get("selection")?.get("required_tags") ?? "")
+            .split(",")
+            .map((tag) => tag.trim().replace(/^"|"$/g, ""))
+            .filter((tag) => tag !== "");
+        const missingTags = requiredTags.filter((tag) => !tags.has(tag.toLowerCase()));
+        liveries.push({
+            editableColors: parseEditableColors(cfg?.get("editable_colors")),
+            id: folderOf(path).replace(/\/$/, ""),
+            folder: folderOf(path).replace(/\/$/, ""),
+            name: match[2],
+            title: cfg?.get("general")?.get("name") || match[2],
+            requiredTags,
+            missingTags,
+            available: missingTags.length === 0
+        });
+    }
+    return liveries.sort((a, b) => a.folder.localeCompare(b.folder));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -823,13 +914,31 @@ function appendGltf(merged, json, { sourcePath, textureFolders, resolvedImages, 
         }
     }
 
-    const scene = json.scenes?.[json.scene ?? 0];
-    if (scene !== undefined) {
-        return (scene.nodes ?? []).map((node) => node + o.nodes);
+    // Submodels (MergeModel files, livery models; "Exported as submodel") have a scene per node
+    // of the model they merge into, named by the scene's ASOBO_unique_id: those scenes' nodes
+    // go below that node (e.g. A32X sharklets below the wingtips, DA62 livery decals below the doors).
+    const roots = [];
+    roots.targeted = [];
+    const defaultScene = json.scene ?? 0;
+    (json.scenes ?? []).forEach((scene, index) => {
+        const target = scene.extensions?.ASOBO_unique_id?.id;
+        const nodes = (scene.nodes ?? []).map((node) => node + o.nodes);
+        if (target) {
+            roots.targeted.push({ target, nodes });
+        } else if (index === defaultScene) {
+            roots.push(...nodes);
+        }
+    });
+    if (json.scenes === undefined || json.scenes.length === 0) {
+        // no scene: all nodes that are nobody's child
+        const children = new Set((json.nodes ?? []).flatMap((node) => node.children ?? []));
+        (json.nodes ?? []).forEach((_, index) => {
+            if (!children.has(index)) {
+                roots.push(index + o.nodes);
+            }
+        });
     }
-    // no scene: all nodes that are nobody's child
-    const children = new Set((json.nodes ?? []).flatMap((node) => node.children ?? []));
-    return (json.nodes ?? []).map((_, index) => index).filter((index) => !children.has(index)).map((index) => index + o.nodes);
+    return roots;
 }
 
 /** Quaternion of MSFS pitch/bank/heading in degrees (heading about Y, pitch about X, bank about Z). */
@@ -853,9 +962,11 @@ function pbhToQuaternion([pitch, bank, heading]) {
  * @param {object} preset from findPresets
  * @param {object[]} items from buildPresetTree (wrapperNode and problems are filled in)
  * @param {(done: number, total: number) => void} [progress]
+ * @param {object} [livery] from findLiveries: its texture folders come first and its models
+ *   (model.<tag>) are merged into the attachments with that tag
  * @returns {Promise<object>} the merged glTF JSON
  */
-async function assemblePreset(preset, items, progress) {
+async function assemblePreset(preset, items, progress, livery = undefined) {
     const files = preset.files;
     const merged = {
         asset: { version: "2.0", generator: "glTF Sample Viewer: MSFS package assembly" },
@@ -879,7 +990,48 @@ async function assemblePreset(preset, items, progress) {
         }
     };
     walk(items, undefined);
-    const total = all.reduce((sum, item) => sum + item.gltfs.length, 0);
+    // Livery (sim order): texture.<tag> for each tag of the attachment, texture.<texture
+    // variant>, texture.<model entry: exterior / interior>, texture; then the attachment's own
+    // folders. Livery models: model.<tag> (attachments) or model.<exterior / interior> (the
+    // common models), Livery_LOD00.gltf or the first LOD of livery.xml, merged like MergeModels.
+    const liveryTextureFolders = (item) => {
+        if (livery === undefined) {
+            return [];
+        }
+        const names = [
+            ...(item.tags ?? []).map((tag) => `texture.${tag}`),
+            item.texture ? `texture.${item.texture}` : undefined,
+            item.model ? `texture.${item.model}` : undefined,
+            "texture"
+        ];
+        return names.filter((name) => name !== undefined).map((name) => `${livery.folder}/${name}`);
+    };
+    for (const item of all) {
+        item.liveryGltfs = [];
+        if (livery === undefined) {
+            continue;
+        }
+        const tags = item.kind === "model" ? [item.model] : item.kind === "attachment" ? item.tags ?? [] : [];
+        for (const tag of tags) {
+            const folder = `${livery.folder}/model.${tag}`;
+            if (!files.hasFolder(folder)) {
+                continue;
+            }
+            try {
+                if (files.has(`${folder}/livery.xml`)) {
+                    item.liveryGltfs.push(...(await readModelXml(files, `${folder}/livery.xml`)));
+                } else {
+                    const lod0 = [`${folder}/Livery_LOD00.gltf`, `${folder}/Livery_LOD0.gltf`].find((path) => files.has(path));
+                    if (lod0 !== undefined) {
+                        item.liveryGltfs.push(files.resolve(lod0));
+                    }
+                }
+            } catch (error) {
+                item.problems.push(`livery model.${tag}: ${error.message}`);
+            }
+        }
+    }
+    const total = all.reduce((sum, item) => sum + item.gltfs.length + item.liveryGltfs.length, 0);
     let done = 0;
 
     // Texture lookup of a model: its own texture folder (model/../texture, or texture.<name>
@@ -893,17 +1045,24 @@ async function assemblePreset(preset, items, progress) {
                 folders.push(folder);
             }
         };
+        for (const folder of liveryTextureFolders(item)) {
+            if (files.hasFolder(folder)) {
+                add(files.url(folder) + "/");
+            }
+        }
         if (item.texture) {
             add(`../texture.${item.texture}/`);
         }
         add("../texture/");
         for (let owner = item; owner !== undefined; owner = owner.parent) {
-            if (!owner.root) {
-                continue;
-            }
-            for (const name of [owner.texture ? `texture.${owner.texture}` : undefined, "texture"]) {
-                if (name !== undefined && files.hasFolder(`${owner.root}/${name}`)) {
-                    add(files.url(`${owner.root}/${name}`) + "/");
+            for (const root of [owner.root, owner.inherits]) {
+                if (!root) {
+                    continue;
+                }
+                for (const name of [owner.texture ? `texture.${owner.texture}` : undefined, "texture"]) {
+                    if (name !== undefined && files.hasFolder(`${root}/${name}`)) {
+                        add(files.url(`${root}/${name}`) + "/");
+                    }
                 }
             }
         }
@@ -932,19 +1091,26 @@ async function assemblePreset(preset, items, progress) {
         }
         return fallbackCache.get(key);
     };
-    const searchFoldersOf = async (item, gltfPath) => {
+    const searchFoldersOf = async (item, gltfPath, liveryOnly = false) => {
         const modelFolder = folderOf(gltfPath);
-        const candidates = [];
-        if (item.texture) {
+        const candidates = [...liveryTextureFolders(item)];
+        if (liveryOnly) {
+            // just the livery's folders (see resolveImages)
+        } else if (item.texture) {
             candidates.push(joinPath(modelFolder, `../texture.${item.texture}`));
         }
-        candidates.push(joinPath(modelFolder, "../texture"));
-        for (let owner = item; owner !== undefined; owner = owner.parent) {
-            if (owner.root) {
-                if (owner.texture) {
-                    candidates.push(`${owner.root}/texture.${owner.texture}`);
+        if (!liveryOnly) {
+            candidates.push(joinPath(modelFolder, "../texture"));
+        }
+        for (let owner = liveryOnly ? undefined : item; owner !== undefined; owner = owner.parent) {
+            // the attachment, then the one it inherits from ([inherit] base)
+            for (const root of [owner.root, owner.inherits]) {
+                if (root) {
+                    if (owner.texture) {
+                        candidates.push(`${root}/texture.${owner.texture}`);
+                    }
+                    candidates.push(`${root}/texture`);
                 }
-                candidates.push(`${owner.root}/texture`);
             }
         }
         const folders = [];
@@ -961,8 +1127,18 @@ async function assemblePreset(preset, items, progress) {
         }
         return folders;
     };
+    const findByName = (folders, name) => {
+        for (const folder of folders) {
+            const found = files.resolve(`${folder}/${name}`);
+            if (found !== undefined) {
+                return found;
+            }
+        }
+        return undefined;
+    };
     const resolveImages = async (json, item, gltfPath) => {
         let folders = undefined;
+        let liveryFolders = undefined;
         return await Promise.all(
             (json.images ?? []).map(async (image) => {
                 if (typeof image.uri !== "string" || image.uri.startsWith("data:")) {
@@ -975,17 +1151,20 @@ async function assemblePreset(preset, items, progress) {
                     // keep it as is
                 }
                 uri = uri.replace(/\\/g, "/");
+                // a livery's folders override everything (the sim only uses the file name), then
                 // the URI itself (unless absolute, e.g. an exporter's C:\... path), then by name
-                let found = /^[a-z]+:/i.test(uri) ? undefined : files.resolve(joinPath(folderOf(gltfPath), uri));
+                const name = baseName(uri);
+                let found = undefined;
+                if (livery !== undefined) {
+                    liveryFolders ??= await searchFoldersOf(item, gltfPath, true);
+                    found = findByName(liveryFolders, name);
+                }
+                if (found === undefined && !/^[a-z]+:/i.test(uri)) {
+                    found = files.resolve(joinPath(folderOf(gltfPath), uri));
+                }
                 if (found === undefined) {
                     folders ??= await searchFoldersOf(item, gltfPath);
-                    const name = baseName(uri);
-                    for (const folder of folders) {
-                        found = files.resolve(`${folder}/${name}`);
-                        if (found !== undefined) {
-                            break;
-                        }
-                    }
+                    found = findByName(folders, name);
                 }
                 return found === undefined
                     ? undefined
@@ -1011,6 +1190,7 @@ async function assemblePreset(preset, items, progress) {
 
     // Pass 1: every item's glTFs below its own wrapper node
     const owner = []; // merged node index -> item that added it
+    const submodelParts = []; // { item, target, nodes, file }: scenes of submodels, see appendGltf
     for (const item of all) {
         // A model's own node is the root of everything in that model, so hiding it hides all
         // attachments of the model too.
@@ -1043,7 +1223,8 @@ async function assemblePreset(preset, items, progress) {
         owner[item.wrapperNode] = item;
 
         const textureFolders = textureFoldersOf(item);
-        for (const gltfPath of item.gltfs) {
+        const gltfPaths = [...item.gltfs, ...item.liveryGltfs];
+        for (const gltfPath of gltfPaths) {
             progress?.(done++, total);
             const problem = await checkGltf(files, gltfPath);
             if (problem !== undefined) {
@@ -1080,8 +1261,11 @@ async function assemblePreset(preset, items, progress) {
             for (let node = first; node < merged.nodes.length; node++) {
                 owner[node] = item;
             }
+            for (const { target, nodes } of roots.targeted) {
+                submodelParts.push({ item, target, nodes, file: baseName(gltfPath) });
+            }
             // one node per file when an item has several (template + merged models)
-            if (item.gltfs.length > 1) {
+            if (gltfPaths.length > 1) {
                 merged.nodes.push({ name: baseName(gltfPath), children: roots });
                 owner[merged.nodes.length - 1] = item;
                 wrapper.children.push(merged.nodes.length - 1);
@@ -1115,6 +1299,32 @@ async function assemblePreset(preset, items, progress) {
             setParent(item.wrapperNode, modelRoot(item.model));
         }
     }
+    // Submodel scenes: below the node named like the scene, looked up in the item's own nodes
+    // first, then in its model.
+    const nodeMatches = (index, wanted) =>
+        merged.nodes[index].name?.toLowerCase() === wanted ||
+        merged.nodes[index].extensions?.ASOBO_unique_id?.id?.toLowerCase() === wanted;
+    for (const { item, target, nodes, file } of submodelParts) {
+        const wanted = target.toLowerCase();
+        const own = new Set(nodes);
+        const isCandidate = (index) => !own.has(index) && nodeMatches(index, wanted) && !nodes.some((node) => isInside(index, node));
+        let parent = undefined;
+        for (let index = 0; index < merged.nodes.length && parent === undefined; index++) {
+            if (owner[index] === item && isCandidate(index)) {
+                parent = index;
+            }
+        }
+        for (let index = 0; index < merged.nodes.length && parent === undefined; index++) {
+            if (owner[index] !== undefined && modelOf(owner[index]) === item.model && isCandidate(index)) {
+                parent = index;
+            }
+        }
+        if (parent === undefined) {
+            item.problems.push(`${file}: node "${target}" for its submodel parts not found`);
+            parent = item.wrapperNode;
+        }
+        nodes.forEach((node) => setParent(node, parent));
+    }
     for (const item of all) {
         if (item.kind !== "attachment" || item.node === undefined) {
             continue;
@@ -1140,6 +1350,40 @@ async function assemblePreset(preset, items, progress) {
             target = modelRoot(item.model);
         }
         setParent(item.wrapperNode, target);
+    }
+
+    // Livery editable colours: the base colour of the listed materials ("tag:name" in the
+    // attachments with that tag, "name@alias" in the attachment with that alias, "name" in the
+    // common models). Multiplied into the base colour factor (linear), so a texture still shades.
+    if (livery?.editableColors?.length > 0) {
+        const itemsById = new Map(all.map((item) => [item.id, item]));
+        const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+        const matches = (target, item) => {
+            if (target.alias !== undefined) {
+                return item.kind === "attachment" && item.name.toLowerCase() === target.alias.toLowerCase();
+            }
+            if (target.tag !== undefined) {
+                return (item.tags ?? []).some((tag) => tag.toLowerCase() === target.tag.toLowerCase());
+            }
+            return item.kind === "model" || item.kind === "merge";
+        };
+        for (const material of merged.materials) {
+            const item = itemsById.get(material.extras?.msfsPackageItem);
+            const name = material.name?.toLowerCase();
+            if (item === undefined || name === undefined) {
+                continue;
+            }
+            const entry = livery.editableColors.find((colour) =>
+                colour.materials.some((target) => target.name.toLowerCase() === name && matches(target, item))
+            );
+            if (entry === undefined) {
+                continue;
+            }
+            const pbr = (material.pbrMetallicRoughness ??= {});
+            const factor = pbr.baseColorFactor ?? [1, 1, 1, 1];
+            pbr.baseColorFactor = [0, 1, 2].map((c) => factor[c] * srgbToLinear(entry.color[c] / 255)).concat(factor[3] ?? 1);
+            material.extras.msfsEditableColor = entry.index;
+        }
     }
 
     for (const key of [...TopLevelArrays, "extensionsRequired"]) {
@@ -1180,6 +1424,7 @@ export {
     PackageFiles,
     assemblePreset,
     buildPresetTree,
+    findLiveries,
     findPresets,
     flattenTree,
     normalizePath,

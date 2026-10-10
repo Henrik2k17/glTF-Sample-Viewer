@@ -25,6 +25,7 @@ import {
     PackageFiles,
     assemblePreset,
     buildPresetTree,
+    findLiveries,
     findPresets,
     flattenTree,
     releaseVirtualFiles,
@@ -102,12 +103,14 @@ export default async () => {
     const state = view.createState();
 
     // The loaded MSFS package preset (see "MSFS packages" below); the Materials tab uses it too.
+    const NoLivery = "none"; // livery selection: load without a livery
     const msfsPackage = {
         packages: [],
         presets: [],
         items: [], // tree of the loaded preset
         byId: new Map(),
         objectUrl: undefined,
+        liveryParam: new URLSearchParams(window.location.search).get("livery") ?? undefined, // until used once
         loading: 0 // generation, to drop results of superseded loads
     };
 
@@ -884,6 +887,8 @@ export default async () => {
         app.packagePresets = [];
         app.selectedPackagePreset = "";
         app.loadedPackagePreset = "";
+        app.packageLiveries = [];
+        app.selectedPackageLivery = "";
         try {
             const packages = await load();
             if (generation !== msfsPackage.loading) {
@@ -947,9 +952,32 @@ export default async () => {
         uiModel.goToLoadingState();
         try {
             const items = await buildPresetTree(preset);
-            const json = await assemblePreset(preset, items, (done, total) => {
-                app.packageStatus = `Reading models ${done} / ${total}…`;
-            });
+            // Liveries whose required tags the preset has. The selection is kept while it is
+            // available ("none" = without livery); otherwise ?livery= (once) or the first one.
+            const liveries = (await findLiveries(preset, items)).filter((livery) => livery.available);
+            const titleCount = (title) => liveries.filter((other) => other.title === title).length;
+            const wantedLivery = (msfsPackage.liveryParam ?? "").toLowerCase();
+            msfsPackage.liveryParam = undefined;
+            const livery =
+                app.selectedPackageLivery === NoLivery
+                    ? undefined
+                    : (liveries.find((entry) => entry.id === app.selectedPackageLivery) ??
+                      liveries.find((entry) => wantedLivery !== "" &&
+                          (entry.name.toLowerCase() === wantedLivery || entry.title.toLowerCase() === wantedLivery)) ??
+                      liveries[0]);
+            app.packageLiveries = liveries.map((entry) => ({
+                id: entry.id,
+                title: titleCount(entry.title) > 1 ? `${entry.title} (${entry.name})` : entry.title
+            }));
+            app.selectedPackageLivery = livery?.id ?? (liveries.length > 0 ? NoLivery : "");
+            const json = await assemblePreset(
+                preset,
+                items,
+                (done, total) => {
+                    app.packageStatus = `Reading models ${done} / ${total}…`;
+                },
+                livery
+            );
             if (generation !== msfsPackage.loading) {
                 return;
             }
@@ -1065,6 +1093,13 @@ export default async () => {
         }
     });
     app.packageLoadPreset.subscribe((id) => loadPreset(id));
+    // a different livery reloads the shown preset with it
+    app.packageLiveryChanged.subscribe((id) => {
+        app.selectedPackageLivery = id;
+        if (app.loadedPackagePreset !== "") {
+            loadPreset(app.loadedPackagePreset);
+        }
+    });
     app.packageOpenUrl.subscribe((url) => {
         url = url.trim();
         if (url !== "") {

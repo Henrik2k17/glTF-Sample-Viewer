@@ -210,6 +210,16 @@
                                             </button>
                                         </div>
                                     </b-field>
+                                    <b-field label="Livery" v-if="packageLiveries.length > 0"
+                                        title="Liveries whose required tags this preset has (livery.cfg [Selection]). Reloads the preset.">
+                                        <b-select v-bind:value="selectedPackageLivery" expanded
+                                            v-on:input="packageLiveryChanged.next($event.target ? $event.target.value : $event)">
+                                            <option v-for="livery in packageLiveries" v-bind:key="livery.id" v-bind:value="livery.id">
+                                                {{ livery.title }}
+                                            </option>
+                                            <option value="none">None (attachment textures)</option>
+                                        </b-select>
+                                    </b-field>
                                     <p class="packageStatus" v-if="packageStatus">{{ packageStatus }}</p>
                                     <template v-if="packageRows.length > 0">
                                         <div class="packageTreeToolbar">

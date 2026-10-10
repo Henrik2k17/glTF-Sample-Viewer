@@ -252,6 +252,7 @@ const appCreated = createApp({
             packageOpenUrl: new Subject(),
             packageOpenFolder: new Subject(),
             packageLoadPreset: new Subject(),
+            packageLiveryChanged: new Subject(),
             packageAttachmentToggled: new Subject(),
             packageAttachmentSelected: new Subject(),
             packageSource: "",
@@ -260,6 +261,9 @@ const appCreated = createApp({
             packagePresets: [],
             selectedPackagePreset: "",
             loadedPackagePreset: "", // preset of the shown model
+            // liveries available for the loaded preset ({ id, title }); "none" = without livery
+            packageLiveries: [],
+            selectedPackageLivery: "",
             // rows: { id, depth, name, kind, visible, problems, title, hasChildren }
             packageRows: [],
             packageCollapsed: {},
