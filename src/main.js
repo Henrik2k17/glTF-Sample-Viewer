@@ -427,6 +427,43 @@ export default async () => {
     );
     listenForRedraw(uiModel.msfsNightLighting);
 
+    // Emissive multiplier (Advanced Controls, or ?emissive=): scales the emissive of every
+    // material, to tune the brightness by eye. Remembered per browser.
+    const EmissiveStorageKey = "emissiveMultiplier";
+    const applyEmissiveMultiplier = (value) => {
+        value = Number(value);
+        if (!Number.isFinite(value) || value <= 0) {
+            return false;
+        }
+        app.emissiveMultiplier = value;
+        state.renderingParameters.emissiveMultiplier = value;
+        redraw = true;
+        return true;
+    };
+    {
+        let stored = new URLSearchParams(window.location.search).get("emissive");
+        if (stored === null) {
+            try {
+                stored = window.localStorage.getItem(EmissiveStorageKey);
+            } catch {
+                stored = null;
+            }
+        }
+        if (stored === null || !applyEmissiveMultiplier(stored)) {
+            applyEmissiveMultiplier(app.emissiveMultiplierDefault);
+        }
+    }
+    app.emissiveMultiplierChanged.subscribe((value) => {
+        if (!applyEmissiveMultiplier(value)) {
+            return;
+        }
+        try {
+            window.localStorage.setItem(EmissiveStorageKey, String(value));
+        } catch {
+            // not remembered, still applied
+        }
+    });
+
     uiModel.showMsfsColliders.subscribe(
         (show) => (state.renderingParameters.showMsfsColliders = show)
     );

@@ -1077,6 +1077,17 @@
                                 <b-field label="MSFS" class="subtitle">
                                     <b-switch v-model="showMsfsInvisibleMaterials" v-on:input="showMsfsInvisibleMaterialsChanged.next($event.target.checked)">Show Invisible / Collision Meshes</b-switch>
                                     <b-switch v-model="msfsNightLighting" v-on:input="msfsNightLightingChanged.next($event.target.checked)">Night Lighting</b-switch>
+                                    <div class="emissiveSettings" title="Multiplies the emissive of every material (logarithmic slider, 0.00001 to 1000; MSFS exports can have emissive factors like 20000). Remembered in this browser, also ?emissive= in the URL.">
+                                        <span class="emissiveLabel">Emissive</span>
+                                        <input type="range" class="emissiveSlider" min="-5" max="3" step="0.01" aria-label="Emissive multiplier"
+                                            v-bind:value="Math.log10(emissiveMultiplier)"
+                                            v-on:input="emissiveMultiplierChanged.next(Math.pow(10, Number($event.target.value)))">
+                                        <input class="input is-small emissiveNumber" type="number" min="0" step="any" aria-label="Emissive multiplier value"
+                                            v-bind:value="formatEmissiveMultiplier(emissiveMultiplier)"
+                                            v-on:change="Number($event.target.value) > 0 && emissiveMultiplierChanged.next(Number($event.target.value))">
+                                        <button class="button is-small is-rounded is-outlined" v-bind:title="'Back to the default (' + emissiveMultiplierDefault + ', tuned against the sim)'"
+                                            v-bind:disabled="emissiveMultiplier === emissiveMultiplierDefault" v-on:click="emissiveMultiplierChanged.next(emissiveMultiplierDefault)">Default</button>
+                                    </div>
                                     <b-switch v-model="showMsfsColliders" v-on:input="showMsfsCollidersChanged.next($event.target.checked)">Show Collision Gizmos</b-switch>
                                     <b-switch v-model="showMsfsLights" v-on:input="showMsfsLightsChanged.next($event.target.checked)">Show Lights</b-switch>
                                 </b-field>

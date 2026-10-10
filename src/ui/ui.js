@@ -36,6 +36,7 @@ const appCreated = createApp({
             floatingPointFramebufferChanged: new Subject(),
             showMsfsInvisibleMaterialsChanged: new Subject(),
             msfsNightLightingChanged: new Subject(),
+            emissiveMultiplierChanged: new Subject(),
             showMsfsCollidersChanged: new Subject(),
             showMsfsLightsChanged: new Subject(),
             msfsAnimationSelectionChanged: new Subject(),
@@ -117,6 +118,10 @@ const appCreated = createApp({
             supportsFloatingPointFramebuffer: true,
             showMsfsInvisibleMaterials: false,
             msfsNightLighting: false,
+            // multiplies every material's emissive (Advanced Controls), see main.js. The default
+            // was tuned by eye against the sim (A32X).
+            emissiveMultiplierDefault: 0.00537,
+            emissiveMultiplier: 0.00537,
             showMsfsColliders: true,
             showMsfsLights: true,
             frustumCulling: true,
@@ -763,6 +768,10 @@ const appCreated = createApp({
         showMaterial(index) {
             this.showTab(MaterialsTab);
             this.materialSelectionChanged.next(index);
+        },
+        // 3 significant digits, no trailing zeros
+        formatEmissiveMultiplier(value) {
+            return Number(value.toPrecision(3));
         },
         toggleBehaviorGroup(id) {
             this.behaviorCollapsed = { ...this.behaviorCollapsed, [id]: !this.behaviorCollapsed[id] };

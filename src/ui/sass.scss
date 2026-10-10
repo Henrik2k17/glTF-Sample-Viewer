@@ -1973,3 +1973,24 @@ $checker: repeating-conic-gradient(#555 0% 25%, #3a3a3a 0% 50%) 50% / 12px 12px;
     background: transparent;
     color: #9fb8d0;
 }
+
+// Advanced Controls: emissive multiplier (logarithmic slider + value)
+.emissiveSettings {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    margin-top: 0.6em;
+    font-size: 14px;
+}
+.emissiveLabel {
+    flex: 0 0 auto;
+}
+.emissiveSlider {
+    flex: 1;
+    min-width: 4em;
+    accent-color: #87c540;
+}
+.emissiveNumber {
+    flex: 0 0 auto;
+    width: 5.5em !important;
+}
