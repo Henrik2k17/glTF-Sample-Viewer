@@ -16,7 +16,7 @@ import {
     getMaterialTextureSlots,
     getMaterialUsage,
 } from "./logic/materials.js";
-import { buildMaterialEditor, hexToLinear } from "./logic/msfs_material_editor.js";
+import { buildMaterialEditor, colorToHex, hexToLinear } from "./logic/msfs_material_editor.js";
 import { readMaterial, writeMaterial, setMaterialType } from "./logic/msfs_material_model.js";
 import { materialForSource, replaceMaterialsInText, downloadText, writeFilesToDirectory } from "./logic/material_save.js";
 import { buildMsfsAnimationEntries, findAnimationsForNode, getAnimatedTargets } from "./logic/msfs_animations.js";
@@ -1457,10 +1457,12 @@ export default async () => {
         materialEditQueue = materialEditQueue.then(async () => {
             let doc = materialDocs.get(index);
             if (doc === undefined) {
-                doc = { model: materialModel(index), changed: new Set() };
+                // original: the material as loaded, to tell which edits are still changes
+                doc = { model: materialModel(index), original: materialModel(index), changed: new Set() };
                 materialDocs.set(index, doc);
             }
             edit(doc.model, doc.changed);
+            forgetUndoneEdits(doc);
             await view.replaceMaterial(state, index, writeMaterial(doc.model));
             materialUsage = getMaterialUsage(state.gltf);
             if (app.materialsSelected === index) {
@@ -1474,6 +1476,42 @@ export default async () => {
     }
 
     const ColorParams = new Set(["baseColor", "emissive", "SSSColor"]);
+
+    // An edit set back to the loaded value is no change any more (no green mark, not saved).
+    // Numbers count as equal at the editor's 3 shown decimals (glass width: shown in mm),
+    // colours as the #rrggbb of the color picker.
+    function sameEditValue(key, a, b) {
+        if (ColorParams.has(key) && Array.isArray(a) && Array.isArray(b)) {
+            return colorToHex(a) === colorToHex(b) && sameEditValue("", a[3], b[3]);
+        }
+        if (typeof a === "number" && typeof b === "number") {
+            return Math.abs(a - b) <= (key === "glassWidth" ? 0.0000005 : 0.0005);
+        }
+        if (Array.isArray(a) && Array.isArray(b)) {
+            return a.length === b.length && a.every((value, i) => sameEditValue("", value, b[i]));
+        }
+        if (a !== null && b !== null && typeof a === "object" && typeof b === "object") {
+            const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+            return [...keys].every((name) => sameEditValue("", a[name], b[name]));
+        }
+        return a === b;
+    }
+    function forgetUndoneEdits(doc) {
+        for (const key of [...doc.changed]) {
+            let same;
+            if (key === "type") {
+                same = doc.model.type === doc.original.type;
+            } else if (key.startsWith("texture:")) {
+                const slot = key.substring("texture:".length);
+                same = sameEditValue("", doc.model.textures[slot], doc.original.textures[slot]);
+            } else {
+                same = sameEditValue(key, doc.model.params[key], doc.original.params[key]);
+            }
+            if (same) {
+                doc.changed.delete(key);
+            }
+        }
+    }
     app.materialParamChanged.subscribe(({ param, value }) => {
         editSelectedMaterial((model, changed) => {
             if (param === "baseColorAlpha") {
