@@ -66,6 +66,39 @@ export default async () => {
         await textureFoldersRestored;
         return textureFolders.resolve(uri);
     };
+
+    // Max texture size (Display tab, or ?maxTextureSize=): larger textures are shrunk while
+    // loading, e.g. to fit an MSFS package into GPU memory. Remembered per browser; a change
+    // reloads the model.
+    const MaxTextureSizeStorageKey = "maxTextureSize";
+    const applyMaxTextureSize = (size) => {
+        size = Number(size);
+        if (!app.maxTextureSizes.some((option) => option.value === size)) {
+            return false;
+        }
+        resourceLoader.maxTextureSize = size;
+        app.maxTextureSize = size;
+        return true;
+    };
+    try {
+        applyMaxTextureSize(
+            new URLSearchParams(window.location.search).get("maxTextureSize") ??
+                window.localStorage.getItem(MaxTextureSizeStorageKey)
+        );
+    } catch {
+        // no limit
+    }
+    app.maxTextureSizeChanged.subscribe((size) => {
+        if (!applyMaxTextureSize(size)) {
+            return;
+        }
+        try {
+            window.localStorage.setItem(MaxTextureSizeStorageKey, String(size));
+        } catch {
+            // not remembered, still applied
+        }
+        app.modelReloadRequested.next(undefined);
+    });
     const state = view.createState();
 
     // The loaded MSFS package preset (see "MSFS packages" below); the Materials tab uses it too.

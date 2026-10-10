@@ -70,6 +70,7 @@ const appCreated = createApp({
             inspectorSelectionChanged: new Subject(),
             inspectorFocus: new Subject(),
             highlightChanged: new Subject(),
+            maxTextureSizeChanged: new Subject(),
             materialSelectionChanged: new Subject(),
             materialViewChanged: new Subject(),
             materialHiddenChanged: new Subject(),
@@ -196,6 +197,16 @@ const appCreated = createApp({
             // sRGB hex from the colour picker; main.js converts it to linear for the renderer
             highlightColor: "#ffb33f",
             highlightStrength: 0.55,
+            // Largest texture width/height loaded (0: full size), see main.js
+            maxTextureSize: 0,
+            maxTextureSizes: [
+                { value: 0, title: "Full size" },
+                { value: 8192, title: "8192" },
+                { value: 4096, title: "4096" },
+                { value: 2048, title: "2048" },
+                { value: 1024, title: "1024" },
+                { value: 512, title: "512" }
+            ],
             // Materials tab (logic/materials.js): list, selected material's textures and factors
             materialsList: [],
             materialsFilter: "",

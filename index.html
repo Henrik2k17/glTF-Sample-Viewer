@@ -354,6 +354,14 @@
                                         </option>
                                     </b-select>
                                 </b-field>
+                                <b-field label="Max Texture Size" class="subtitle"
+                                    title="Larger textures are shrunk while loading (fewer mip levels for compressed ones), to save GPU memory. Reloads the model.">
+                                    <b-select v-on:input="maxTextureSizeChanged.next(Number($event.target.value))" v-model="maxTextureSize">
+                                        <option v-for="(item) in maxTextureSizes" v-bind:value="item.value">
+                                            {{ item.title }}
+                                        </option>
+                                    </b-select>
+                                </b-field>
                                 <b-field label="Selection Highlight" class="subtitle"></b-field>
                                 <div class="highlightSettings" title="Tint of parts selected in the Inspector, Materials and Animations tabs">
                                     <input type="color" title="Highlight colour" v-model="highlightColor"
