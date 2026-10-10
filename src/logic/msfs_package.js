@@ -938,6 +938,8 @@ function appendGltf(merged, json, { sourcePath, textureFolders, resolvedImages, 
             }
         });
     }
+    // merged texture index of each of the file's textures (to save edits back to the file)
+    roots.textureMap = textureMap;
     return roots;
 }
 
@@ -1190,6 +1192,7 @@ async function assemblePreset(preset, items, progress, livery = undefined) {
 
     // Pass 1: every item's glTFs below its own wrapper node
     const owner = []; // merged node index -> item that added it
+    const sourceTextures = {}; // glTF path -> merged texture index per texture of the file
     const submodelParts = []; // { item, target, nodes, file }: scenes of submodels, see appendGltf
     for (const item of all) {
         // A model's own node is the root of everything in that model, so hiding it hides all
@@ -1248,10 +1251,11 @@ async function assemblePreset(preset, items, progress, livery = undefined) {
             }
             const first = merged.nodes.length;
             const resolvedImages = await resolveImages(json, item, gltfPath);
-            // the entry each material comes from (Materials tab groups by it)
-            for (const material of json.materials ?? []) {
-                material.extras = { ...material.extras, msfsPackageItem: item.id };
-            }
+            // the entry each material comes from (Materials tab groups by it) and its place in
+            // the source file (material editor: saving)
+            (json.materials ?? []).forEach((material, index) => {
+                material.extras = { ...material.extras, msfsPackageItem: item.id, msfsSource: { path: gltfPath, index } };
+            });
             const roots = appendGltf(merged, json, {
                 sourcePath: files.url(gltfPath),
                 textureFolders,
@@ -1261,6 +1265,7 @@ async function assemblePreset(preset, items, progress, livery = undefined) {
             for (let node = first; node < merged.nodes.length; node++) {
                 owner[node] = item;
             }
+            sourceTextures[gltfPath] = roots.textureMap;
             for (const { target, nodes } of roots.targeted) {
                 submodelParts.push({ item, target, nodes, file: baseName(gltfPath) });
             }
@@ -1398,6 +1403,8 @@ async function assemblePreset(preset, items, progress, livery = undefined) {
             merged.extensionsUsed.push(name);
         }
     }
+    // not glTF: for the material editor (texture indices of the source files), see main.js
+    merged.extras = { ...merged.extras, msfsSourceTextures: sourceTextures };
     return merged;
 }
 

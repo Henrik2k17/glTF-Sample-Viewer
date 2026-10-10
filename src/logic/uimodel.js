@@ -82,7 +82,6 @@ class UIModel {
         this.materialSelection = app.materialSelectionChanged.pipe();
         this.materialView = app.materialViewChanged.pipe();
         this.materialHidden = app.materialHiddenChanged.pipe();
-        this.materialFactor = app.materialFactorChanged.pipe();
         this.materialTextureToggle = app.materialTextureToggled.pipe();
         this.materialReset = app.materialReset.pipe();
         this.materialTextureOpen = app.materialTextureOpened.pipe();

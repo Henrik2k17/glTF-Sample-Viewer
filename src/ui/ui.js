@@ -74,7 +74,11 @@ const appCreated = createApp({
             materialSelectionChanged: new Subject(),
             materialViewChanged: new Subject(),
             materialHiddenChanged: new Subject(),
-            materialFactorChanged: new Subject(),
+            // material editor (logic/msfs_material_editor.js): { param, value }, type, { slot, textureIndex }, "folder" | "download"
+            materialParamChanged: new Subject(),
+            materialTypeChanged: new Subject(),
+            materialTextureAssigned: new Subject(),
+            materialSaveRequested: new Subject(),
             materialTextureToggled: new Subject(),
             materialReset: new Subject(),
             materialTextureOpened: new Subject(),
@@ -223,7 +227,10 @@ const appCreated = createApp({
             materialsHidden: [],
             materialInfo: [],
             materialTextures: [],
-            materialFactors: [],
+            // Materials tab in the 3ds Max material editor layout (logic/msfs_material_editor.js)
+            materialEditor: undefined,
+            materialRollouts: { parameters: true, textures: true, info: false, users: false },
+            materialTextureSize: "medium",
             materialUsers: [],
             materialEdited: false,
             materialEditedCount: 0,
@@ -862,6 +869,31 @@ const appCreated = createApp({
             const others = this.materialsHidden.filter((other) => other !== index);
             this.materialHiddenChanged.next(hidden ? [...others, index] : others);
         },
+        // Material editor spinners (3ds Max style): rounded display, range clamp, arrow steps
+        formatMaxNumber(field) {
+            const value = Number(field.value);
+            if (!Number.isFinite(value)) {
+                return field.value;
+            }
+            return field.integer ? Math.round(value) : Math.round(value * 1000) / 1000;
+        },
+        clampMaxNumber(field, value) {
+            if (!Number.isFinite(value)) {
+                return field.value;
+            }
+            const min = field.min ?? -Infinity;
+            const max = field.max ?? Infinity;
+            return Math.min(max, Math.max(min, value));
+        },
+        stepMaxNumber(field, direction) {
+            this.setMaxNumber(field, Number(field.value) + direction * (field.step || 0.01));
+        },
+        // field.scale: shown scaled (glass width in mm); main.js converts back
+        setMaxNumber(field, value) {
+            let clamped = this.clampMaxNumber(field, value);
+            clamped = field.integer ? Math.round(clamped) : Math.round(clamped * 100000) / 100000;
+            this.materialParamChanged.next({ param: field.param, value: clamped });
+        },
         revealMaterial(index) {
             const group = this.materialsList.find((row) => row.index === index)?.group;
             if (group !== undefined && this.materialsCollapsed[group.key]) {
@@ -904,6 +936,13 @@ const appCreated = createApp({
                 }
             }
             this.packageCollapsed = state;
+        },
+        info(message) {
+            this.$buefy.toast.open({
+                message: message,
+                type: "is-success",
+                duration: 4000
+            });
         },
         warn(message) {
             this.$buefy.toast.open({

@@ -126,7 +126,7 @@
                     <b-tabs id="tabsContainer" 
                         vertical position="is-right" 
                         v-model="activeTabIndex"
-                        v-bind:class="[tabContentHidden ? 'is-flex-wrap-nowrap hideTabs tabsContainer' : 'is-flex-wrap-nowrap tabsContainer']" 
+                        v-bind:class="[tabContentHidden ? 'is-flex-wrap-nowrap hideTabs tabsContainer' : 'is-flex-wrap-nowrap tabsContainer', { materialsWide: !tabContentHidden && activeTab === 8 }]" 
                         type="is-toggle" v-bind:animated="false">
 
                         <!-- Tab Category: Models -->
@@ -966,87 +966,141 @@
                                             Hide
                                         </label>
                                     </div>
-                                    <div class="inspectorSection">
-                                        <div class="inspectorSectionTitle">Material {{ materialsSelected }}</div>
-                                        <table class="inspectorTable">
-                                            <tr v-for="(row, rowIndex) in materialInfo" v-bind:key="rowIndex" v-bind:title="row[2]">
-                                                <th>{{ row[0] }}</th>
-                                                <td>{{ row[1] }}</td>
-                                            </tr>
-                                        </table>
+                                    <!-- Material editor in the layout of the MSFS 2024 material in 3ds Max (logic/msfs_material_editor.js) -->
+                                    <div class="maxSaveBar" v-if="materialsList.length > 0">
+                                        <span class="maxSaveCount">{{ materialEditedCount }} edited material(s)</span>
+                                        <button class="maxButton" v-bind:disabled="materialEditedCount === 0"
+                                            title="Write the edited materials into their .gltf files in a folder you choose (the package root, or the folder of the .gltf); each file is copied to .bak first"
+                                            v-on:click="materialSaveRequested.next('folder')">Save to folder…</button>
+                                        <button class="maxButton" v-bind:disabled="materialEditedCount === 0"
+                                            title="Download the .gltf files with the edited materials"
+                                            v-on:click="materialSaveRequested.next('download')">Download</button>
                                     </div>
-
-                                    <div class="inspectorSection">
-                                        <div class="inspectorSectionTitle">Textures ({{ materialTextures.length }})</div>
-                                        <p v-if="materialTextures.length === 0" class="inspectorInfo">No textures.</p>
-                                        <div v-for="texture in materialTextures" v-bind:key="texture.id" class="materialTexture"
-                                            v-bind:class="'materialTexture-' + texture.status">
-                                            <div class="materialThumb" v-bind:title="texture.textureIndex !== undefined ? 'Open in the texture viewer' : ''"
-                                                v-on:click="texture.textureIndex !== undefined && materialTextureOpened.next(texture.id)">
-                                                <img v-if="texture.thumbnail" v-bind:src="texture.thumbnail">
-                                                <span v-else class="materialThumbMissing">{{ texture.status === 'missing' ? 'missing' : '…' }}</span>
+                                    <div class="maxEditor" v-if="materialEditor">
+                                        <div class="maxRollout">
+                                            <div class="maxRolloutHeader" v-on:click="materialRollouts.parameters = !materialRollouts.parameters">
+                                                <span class="maxTwisty">{{ materialRollouts.parameters ? '&#9662;' : '&#9656;' }}</span> Parameters
+                                                <button class="maxResetButton" v-bind:disabled="!materialEdited" title="Undo the live edits and texture switches of this material"
+                                                    v-on:click.stop="materialReset.next(materialsSelected)">Reset</button>
                                             </div>
-                                            <div class="materialTextureText">
-                                                <div class="materialTextureTitle">
-                                                    <span class="materialTextureLabel">
-                                                        <span v-if="texture.group" class="materialTextureGroup">{{ texture.group }} &middot; </span>{{ texture.label }}
-                                                    </span>
-                                                    <span class="materialStatus" v-bind:class="'materialStatus-' + texture.status"
-                                                        v-bind:title="{ ok: 'Used for rendering', off: 'Switched off: rendered as if absent', missing: 'The image could not be loaded', unused: 'Loaded, but this viewer does not render it' }[texture.status]">{{ texture.status }}</span>
-                                                    <label v-if="texture.status === 'ok' || texture.status === 'off'" class="materialTextureToggle"
-                                                        title="Switch the texture off to see the material without it">
-                                                        <input type="checkbox" v-bind:checked="texture.status === 'ok'"
-                                                            v-on:change="materialTextureToggled.next({ id: texture.id, enabled: $event.target.checked })">
+                                            <div class="maxRolloutBody" v-show="materialRollouts.parameters">
+                                                <div class="maxTypeRow">
+                                                    <span class="maxLabel">Material Type:</span>
+                                                    <select class="maxSelect" v-bind:disabled="!materialEditor.msfs"
+                                                        v-bind:title="materialEditor.msfs ? 'Changes the material type like the 3ds Max material (written as the exporter would)' : 'Not an MSFS glTF'"
+                                                        v-on:change="materialTypeChanged.next($event.target.value)">
+                                                        <option v-for="type in materialEditor.types" v-bind:key="type" v-bind:value="type" v-bind:selected="type === materialEditor.type">{{ type }}</option>
+                                                    </select>
+                                                </div>
+                                                <div v-for="(section, sectionIndex) in materialEditor.sections" v-bind:key="sectionIndex"
+                                                    class="maxSection" v-bind:class="{ maxSectionColumns: section.columns.length > 1 }">
+                                                    <div v-for="(column, columnIndex) in section.columns" v-bind:key="columnIndex" class="maxColumn">
+                                                        <fieldset v-for="(group, groupIndex) in column" v-bind:key="groupIndex" class="maxGroup"
+                                                            v-bind:class="{ maxGroupPlain: group.plain, ['maxGrid' + (group.grid || 0)]: group.grid }">
+                                                            <legend v-if="group.title">{{ group.title }}</legend>
+                                                            <template v-for="(field, fieldIndex) in group.fields" v-bind:key="fieldIndex">
+                                                                <div v-if="field.kind === 'radio'" class="maxRadios" v-bind:class="{ maxDisabled: field.enabled === false, maxEdited: field.edited }">
+                                                                    <label v-for="option in field.options" v-bind:key="option" class="maxRadio">
+                                                                        <input type="radio" v-bind:disabled="field.enabled === false" v-bind:checked="field.value === option"
+                                                                            v-on:change="materialParamChanged.next({ param: field.param, value: option })"> {{ option }}
+                                                                    </label>
+                                                                </div>
+                                                                <label v-else-if="field.kind === 'check'" class="maxField maxCheck" v-bind:class="{ maxDisabled: field.enabled === false, maxEdited: field.edited }">
+                                                                    <input type="checkbox" v-bind:disabled="field.enabled === false" v-bind:checked="field.value"
+                                                                        v-on:change="materialParamChanged.next({ param: field.param, value: $event.target.checked })"> <span class="maxLabel">{{ field.label }}</span>
+                                                                </label>
+                                                                <div v-else class="maxField" v-bind:class="['maxField-' + field.kind, { maxDisabled: field.enabled === false, maxEdited: field.edited, maxInline: field.inline }]">
+                                                                    <span class="maxLabel">{{ field.label }}</span>
+                                                                    <input v-if="field.kind === 'color'" type="color" class="maxColor" v-bind:value="field.value"
+                                                                        v-bind:disabled="field.enabled === false"
+                                                                        v-on:change="materialParamChanged.next({ param: field.param, value: $event.target.value })">
+                                                                    <span v-else-if="field.kind === 'text'" class="maxText">{{ field.value }}</span>
+                                                                    <span v-else class="maxSpinner">
+                                                                        <input type="number" v-bind:step="field.step || 0.01" v-bind:value="formatMaxNumber(field)"
+                                                                            v-bind:disabled="field.enabled === false"
+                                                                            v-on:change="setMaxNumber(field, Number($event.target.value))">
+                                                                        <span class="maxSpinArrows" v-if="field.enabled !== false">
+                                                                            <button tabindex="-1" v-on:click="stepMaxNumber(field, 1)">&#9652;</button>
+                                                                            <button tabindex="-1" v-on:click="stepMaxNumber(field, -1)">&#9662;</button>
+                                                                        </span>
+                                                                    </span>
+                                                                    <span v-if="field.unit" class="maxUnit">{{ field.unit }}</span>
+                                                                </div>
+                                                            </template>
+                                                        </fieldset>
+                                                    </div>
+                                                </div>
+                                                <p v-if="materialEdited" class="maxNote">Edited (shown live; use Save to folder or Download to write it into the file).</p>
+                                            </div>
+                                        </div>
+
+                                        <div class="maxRollout">
+                                            <div class="maxRolloutHeader" v-on:click="materialRollouts.textures = !materialRollouts.textures">
+                                                <span class="maxTwisty">{{ materialRollouts.textures ? '&#9662;' : '&#9656;' }}</span> Textures
+                                            </div>
+                                            <div class="maxRolloutBody" v-show="materialRollouts.textures">
+                                                <div class="maxTextureSizes">
+                                                    Display size:
+                                                    <label v-for="size in ['small', 'medium', 'large']" v-bind:key="size" class="maxRadio">
+                                                        <input type="radio" v-bind:value="size" v-model="materialTextureSize"> {{ size }}
                                                     </label>
                                                 </div>
-                                                <div class="materialTextureFile" v-bind:title="texture.file">
-                                                    {{ texture.file }}<span v-if="texture.width"> &middot; {{ texture.width }}&times;{{ texture.height }}</span>
+                                                <div v-for="row in materialEditor.textures" v-bind:key="row.slot" class="maxSlot"
+                                                    v-bind:class="['maxSlot-' + materialTextureSize, row.textureIndex !== undefined ? 'maxSlot-' + row.status : 'maxSlot-empty', { maxEdited: row.edited }]"
+                                                    v-bind:title="row.tooltip">
+                                                    <div v-if="row.textureIndex !== undefined && materialTextureSize !== 'small'" class="maxSlotThumb"
+                                                        v-on:click="materialTextureOpened.next({ textureIndex: row.textureIndex, label: row.label })">
+                                                        <img v-if="row.thumbnail" v-bind:src="row.thumbnail">
+                                                        <span v-else>{{ row.status === 'missing' ? '?' : '…' }}</span>
+                                                    </div>
+                                                    <div class="maxSlotText">
+                                                        <div class="maxSlotLabel">{{ row.label }}</div>
+                                                        <select class="maxSlotSelect" title="Texture in this slot (textures of this model file)"
+                                                            v-on:change="materialTextureAssigned.next({ slot: row.slot, textureIndex: $event.target.value })">
+                                                            <option value="" v-bind:selected="row.textureIndex === undefined">None</option>
+                                                            <option v-for="choice in row.choices" v-bind:key="choice.index" v-bind:value="choice.index"
+                                                                v-bind:selected="choice.index === row.textureIndex">{{ choice.label }}</option>
+                                                        </select>
+                                                    </div>
+                                                    <template v-if="row.textureIndex !== undefined">
+                                                        <span class="materialStatus" v-bind:class="'materialStatus-' + row.status"
+                                                            v-bind:title="{ ok: 'Used for rendering', off: 'Switched off: rendered as if absent', missing: 'The image could not be loaded', unused: 'Loaded, but this viewer does not render it' }[row.status]">{{ row.status }}</span>
+                                                        <input v-if="row.viewerId && (row.status === 'ok' || row.status === 'off')" type="checkbox" class="maxSlotToggle"
+                                                            title="Switch the texture off to see the material without it (view only)" v-bind:checked="row.status === 'ok'"
+                                                            v-on:change="materialTextureToggled.next({ id: row.viewerId, enabled: $event.target.checked })">
+                                                    </template>
                                                 </div>
-                                                <table class="inspectorTable materialTextureRows">
-                                                    <tr v-for="(row, rowIndex) in texture.rows" v-bind:key="rowIndex">
+                                            </div>
+                                        </div>
+
+                                        <div class="maxRollout">
+                                            <div class="maxRolloutHeader" v-on:click="materialRollouts.info = !materialRollouts.info">
+                                                <span class="maxTwisty">{{ materialRollouts.info ? '&#9662;' : '&#9656;' }}</span> Info (material {{ materialsSelected }})
+                                            </div>
+                                            <div class="maxRolloutBody" v-show="materialRollouts.info">
+                                                <table class="inspectorTable">
+                                                    <tr v-for="(row, rowIndex) in materialInfo" v-bind:key="rowIndex" v-bind:title="row[2]">
                                                         <th>{{ row[0] }}</th>
                                                         <td>{{ row[1] }}</td>
                                                     </tr>
                                                 </table>
                                             </div>
                                         </div>
-                                    </div>
 
-                                    <div class="inspectorSection">
-                                        <div class="inspectorSectionTitle materialFactorsTitle">
-                                            <span>Factors (live, not saved)</span>
-                                            <button class="button is-small is-rounded is-outlined" v-bind:disabled="!materialEdited"
-                                                v-on:click="materialReset.next(materialsSelected)">Reset</button>
-                                        </div>
-                                        <div v-for="factor in materialFactors" v-bind:key="factor.key" class="materialFactor"
-                                            v-bind:class="{ materialFactorEdited: factor.edited }">
-                                            <span class="materialFactorLabel">{{ factor.label }}</span>
-                                            <template v-if="factor.type === 'color'">
-                                                <input type="color" v-bind:value="factor.value"
-                                                    v-on:input="materialFactorChanged.next({ key: factor.key, value: $event.target.value })">
-                                                <span class="materialFactorValue">{{ factor.value }}</span>
-                                            </template>
-                                            <template v-else>
-                                                <input type="range" class="materialFactorRange" min="0" v-bind:max="factor.max" step="0.01"
-                                                    v-bind:value="factor.value"
-                                                    v-on:input="materialFactorChanged.next({ key: factor.key, value: Number($event.target.value) })">
-                                                <input type="number" class="materialFactorNumber" min="0" step="0.01"
-                                                    v-bind:value="Math.round(factor.value * 1000) / 1000"
-                                                    v-on:change="materialFactorChanged.next({ key: factor.key, value: Number($event.target.value) })">
-                                            </template>
-                                        </div>
-                                        <p v-if="materialEditedCount > 0" class="inspectorInfo">{{ materialEditedCount }} material(s) edited in this session.</p>
-                                    </div>
-
-                                    <div class="inspectorSection">
-                                        <div class="inspectorSectionTitle">Used by ({{ materialUsers.length }} nodes)</div>
-                                        <p v-if="materialUsers.length === 0" class="inspectorInfo">No node uses this material.</p>
-                                        <div class="materialUsers">
-                                            <div v-for="user in materialUsers" v-bind:key="user.nodeIndex" class="inspectorRow"
-                                                v-bind:title="'Show ' + user.name + ' in the Inspector'"
-                                                v-on:click="showInspectorNode(user.nodeIndex)">
-                                                <span class="inspectorName">{{ user.name }}</span>
-                                                <span class="inspectorBadge" v-if="user.primitives > 1">{{ user.primitives }} primitives</span>
+                                        <div class="maxRollout">
+                                            <div class="maxRolloutHeader" v-on:click="materialRollouts.users = !materialRollouts.users">
+                                                <span class="maxTwisty">{{ materialRollouts.users ? '&#9662;' : '&#9656;' }}</span> Used by ({{ materialUsers.length }} nodes)
+                                            </div>
+                                            <div class="maxRolloutBody" v-show="materialRollouts.users">
+                                                <p v-if="materialUsers.length === 0" class="inspectorInfo">No node uses this material.</p>
+                                                <div class="materialUsers">
+                                                    <div v-for="user in materialUsers" v-bind:key="user.nodeIndex" class="inspectorRow"
+                                                        v-bind:title="'Show ' + user.name + ' in the Inspector'"
+                                                        v-on:click="showInspectorNode(user.nodeIndex)">
+                                                        <span class="inspectorName">{{ user.name }}</span>
+                                                        <span class="inspectorBadge" v-if="user.primitives > 1">{{ user.primitives }} primitives</span>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>

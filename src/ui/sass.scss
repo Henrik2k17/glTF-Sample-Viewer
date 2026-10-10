@@ -1246,61 +1246,6 @@ $checker: repeating-conic-gradient(#555 0% 25%, #3a3a3a 0% 50%) 50% / 12px 12px;
     font-size: 11px;
     margin-top: 0.15em;
 }
-.materialFactorsTitle {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-bottom: 0.2em;
-}
-.materialFactorsTitle .button {
-    height: 1.6em;
-    font-size: 11px;
-    text-transform: none;
-    letter-spacing: normal;
-}
-.materialFactor {
-    display: flex;
-    align-items: center;
-    gap: 0.5em;
-    font-size: 12px;
-    padding: 1px 0 1px 4px;
-    border-left: 3px solid transparent;
-}
-.materialFactor.materialFactorEdited {
-    border-left-color: #ff8a1e;
-}
-.materialFactorLabel {
-    flex: 0 0 38%;
-    opacity: 0.8;
-}
-.materialFactor input[type="color"] {
-    width: 32px;
-    height: 20px;
-    padding: 0;
-    border: 1px solid #5a5a5a;
-    border-radius: 3px;
-    background: transparent;
-    cursor: pointer;
-}
-.materialFactorValue {
-    font-variant-numeric: tabular-nums;
-    opacity: 0.8;
-}
-.materialFactorRange {
-    flex: 1;
-    min-width: 0;
-    accent-color: #87c540;
-}
-.materialFactorNumber {
-    flex: 0 0 4.5em;
-    width: 4.5em;
-    font-size: 12px;
-    background: #2a2a2a;
-    color: #f2f2f2;
-    border: 1px solid #4a4a4a;
-    border-radius: 3px;
-    padding: 0 3px;
-}
 .materialUsers {
     max-height: 20vh;
     overflow-y: auto;
@@ -1502,4 +1447,350 @@ $checker: repeating-conic-gradient(#555 0% 25%, #3a3a3a 0% 50%) 50% / 12px 12px;
     flex: 0 0 auto;
     font-variant-numeric: tabular-nums;
     opacity: 0.7;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Materials tab: material editor in the style of the MSFS 2024 material in 3ds Max
+// (rollouts, group boxes, spinners, texture slot buttons).
+.materialsWide .tab-content {
+    width: 420px;
+}
+.maxEditor {
+    margin-top: 0.5em;
+    font-size: 12px;
+    color: #dcdcdc;
+}
+.maxRollout {
+    margin-bottom: 6px;
+    background: #444;
+    border: 1px solid #2a2a2a;
+    border-radius: 2px;
+}
+.maxRolloutHeader {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    background: #333;
+    font-weight: 700;
+    cursor: pointer;
+    user-select: none;
+}
+.maxTwisty {
+    font-size: 10px;
+    width: 10px;
+}
+.maxResetButton {
+    margin-left: auto;
+    font-size: 11px;
+    padding: 0 8px;
+    background: #5a5a5a;
+    color: #eee;
+    border: 1px solid #2a2a2a;
+    border-radius: 2px;
+    cursor: pointer;
+}
+.maxResetButton:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+.maxRolloutBody {
+    padding: 6px 8px 8px;
+}
+.maxTypeRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 2px 0 6px;
+    padding-top: 6px;
+    border-top: 1px solid #5a5a5a;
+}
+.maxSelect {
+    flex: 1;
+    background: #555;
+    color: #eee;
+    border: 1px solid #2a2a2a;
+    padding: 1px 4px;
+    font-size: 12px;
+}
+.maxSelect:disabled {
+    opacity: 1;
+}
+.maxSection {
+    margin-top: 4px;
+}
+.maxSectionColumns {
+    display: grid;
+    // the spinner column has the long labels ("Wear Overlay UV Scale:")
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    gap: 6px;
+}
+.maxColumn {
+    min-width: 0;
+}
+.maxGroup {
+    border: 1px solid #5f5f5f;
+    border-radius: 3px;
+    padding: 2px 7px 5px;
+    margin: 0 0 6px;
+    min-width: 0;
+}
+.maxGroup legend {
+    padding: 0 3px;
+    font-size: 12px;
+    color: #e6e6e6;
+}
+.maxGroupPlain {
+    border-color: transparent;
+    padding: 0;
+}
+.maxGrid3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    column-gap: 8px;
+}
+.maxField {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 22px;
+}
+.maxGroupPlain .maxField-number {
+    justify-content: flex-end;
+}
+.maxGroupPlain .maxField-number .maxLabel {
+    text-align: right;
+}
+.maxField .maxLabel {
+    flex: 0 1 auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.maxGroup:not(.maxGroupPlain) .maxField-number .maxLabel {
+    flex: 1 1 auto;
+}
+// a color with its multiplier on one line (Emissive Color ... x ... cd/m²)
+.maxField-color,
+.maxInline {
+    display: inline-flex;
+    vertical-align: middle;
+}
+.maxInline {
+    margin-left: 8px;
+}
+.maxEdited .maxLabel {
+    color: #a6d86e;
+}
+.maxDisabled {
+    opacity: 0.4;
+}
+.maxSpinner {
+    display: inline-flex;
+    align-items: stretch;
+    flex: 0 0 auto;
+    background: #555;
+    border: 1px solid #2a2a2a;
+    border-radius: 2px;
+}
+.maxSpinner input {
+    width: 46px;
+    background: transparent;
+    color: #f0f0f0;
+    border: none;
+    font-size: 12px;
+    padding: 1px 3px;
+    text-align: left;
+    -moz-appearance: textfield;
+}
+.maxSpinner input::-webkit-outer-spin-button,
+.maxSpinner input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.maxSpinner input[readonly] {
+    color: #bdbdbd;
+}
+.maxSpinArrows {
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid #2a2a2a;
+}
+.maxSpinArrows button {
+    flex: 1;
+    width: 12px;
+    padding: 0;
+    font-size: 8px;
+    line-height: 8px;
+    background: #4b4b4b;
+    color: #ddd;
+    border: none;
+    cursor: pointer;
+}
+.maxSpinArrows button:hover {
+    background: #6a6a6a;
+}
+.maxUnit {
+    opacity: 0.85;
+}
+.maxColor {
+    width: 46px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid #2a2a2a;
+    background: none;
+    cursor: pointer;
+}
+.maxColor:disabled {
+    cursor: default;
+}
+.maxText {
+    color: #bdbdbd;
+}
+.maxCheck,
+.maxRadio {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 20px;
+    white-space: nowrap;
+}
+.maxCheck input,
+.maxRadio input {
+    accent-color: #87c540;
+    margin: 0;
+}
+.maxRadios {
+    display: flex;
+    flex-direction: column;
+    padding: 1px 0 1px 8px;
+}
+.maxNote {
+    margin-top: 2px;
+    font-size: 11px;
+    opacity: 0.75;
+}
+.maxTextureSizes {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.maxSubheading {
+    margin: 8px 0 4px;
+    font-size: 11px;
+    opacity: 0.75;
+}
+.maxSlot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+    padding: 2px 6px;
+    min-height: 22px;
+    background: #5a5a5a;
+    border: 1px solid #2e2e2e;
+    border-radius: 2px;
+}
+.maxSlot-empty {
+    justify-content: center;
+    background: #505050;
+    color: #e6e6e6;
+}
+.maxSlot-empty .maxSlotText {
+    text-align: center;
+    flex: 1;
+}
+.maxSlot-medium {
+    min-height: 40px;
+}
+.maxSlot-large {
+    min-height: 88px;
+}
+.maxSlotThumb {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #2a2a2a;
+    cursor: pointer;
+    overflow: hidden;
+}
+.maxSlot-medium .maxSlotThumb {
+    width: 32px;
+    height: 32px;
+}
+.maxSlot-large .maxSlotThumb {
+    width: 80px;
+    height: 80px;
+}
+.maxSlotThumb img {
+    max-width: 100%;
+    max-height: 100%;
+}
+.maxSlotText {
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+}
+.maxSlotLabel {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.maxSlotFile {
+    font-size: 11px;
+    opacity: 0.75;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.maxSlot-missing .maxSlotFile {
+    color: #ffb3b3;
+}
+.maxSlotToggle {
+    accent-color: #87c540;
+}
+
+.maxSaveBar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 0 4px;
+    padding: 4px 8px;
+    background: #333;
+    border: 1px solid #2a2a2a;
+    border-radius: 2px;
+    font-size: 12px;
+}
+.maxSaveCount {
+    flex: 1;
+    color: #dcdcdc;
+}
+.maxButton {
+    font-size: 12px;
+    padding: 1px 10px;
+    background: #5a5a5a;
+    color: #eee;
+    border: 1px solid #2a2a2a;
+    border-radius: 2px;
+    cursor: pointer;
+}
+.maxButton:hover:not(:disabled) {
+    background: #6a6a6a;
+}
+.maxButton:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+.maxSlotSelect {
+    width: 100%;
+    margin-top: 2px;
+    background: #4a4a4a;
+    color: #eee;
+    border: 1px solid #2a2a2a;
+    font-size: 11px;
+}
+.maxSlot.maxEdited {
+    border-color: #87c540;
 }

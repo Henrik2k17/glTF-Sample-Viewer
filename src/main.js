@@ -15,8 +15,10 @@ import {
     getChannelHints,
     getMaterialTextureSlots,
     getMaterialUsage,
-    MaterialEdits
 } from "./logic/materials.js";
+import { buildMaterialEditor, hexToLinear } from "./logic/msfs_material_editor.js";
+import { readMaterial, writeMaterial, setMaterialType } from "./logic/msfs_material_model.js";
+import { materialForSource, replaceMaterialsInText, downloadText, writeFilesToDirectory } from "./logic/material_save.js";
 import { buildMsfsAnimationEntries, findAnimationsForNode, getAnimatedTargets } from "./logic/msfs_animations.js";
 import { summarizeValidation } from "./logic/validation_summary.js";
 import { TextureFolders } from "./logic/texture_folders.js";
@@ -228,6 +230,8 @@ export default async () => {
         redraw = true;
     }
 
+    let loadedModelSource = undefined; // { mainFile, package } of the shown model (material editor: saving)
+
     // whenever a new model is selected, load it and when complete pass the loaded gltf
     // into a stream back into the UI
     let modelLoadGeneration = 0;
@@ -250,6 +254,7 @@ export default async () => {
                             return state;
                         }
                         state.gltf = gltf;
+                        loadedModelSource = model;
                         const missingImages = gltf.images.filter((image) => !image.isLoaded());
                         if (missingImages.length > 0) {
                             app.warn(
@@ -999,6 +1004,8 @@ export default async () => {
             );
             app.packageStatus = "Loading textures and geometry…";
             app.loadedPackagePreset = id;
+            msfsPackage.presetFiles = preset.files;
+            msfsPackage.sourceTextures = json.extras?.msfsSourceTextures ?? {};
             uiModel.packageModels.next({ mainFile: msfsPackage.objectUrl, package: true, presetId: id });
         } catch (error) {
             console.error("Assembling the preset failed", error);
@@ -1319,15 +1326,19 @@ export default async () => {
     };
 
     // Materials tab: the selected material's parts are tinted (or shown alone), its textures are
-    // read back from the GPU for thumbnails and the texture viewer, and its factors can be edited
-    // live. Nothing is written back to the file.
-    const materialEdits = new MaterialEdits();
+    // read back from the GPU for thumbnails and the texture viewer, and it can be edited like the
+    // 3ds Max MSFS material (logic/msfs_material_model.js): every change is written back to glTF
+    // material JSON and replaces the material in the renderer; Save writes the edited materials
+    // into their files (logic/material_save.js).
+    const materialDocs = new Map(); // material index -> { model, changed: Set } of edited materials
+    let materialEditQueue = Promise.resolve();
     let materialSlots = []; // [{slot, bound}] of the selected material; bound is the renderer's textureInfo
     let materialUsage = new Map();
     let thumbnails = new Map(); // texture index -> data URL, for the loaded glTF
 
     function setupMaterials(gltf) {
-        materialEdits.clear();
+        materialDocs.clear();
+        app.materialEditedCount = 0;
         thumbnails = new Map();
         materialUsage = getMaterialUsage(gltf);
         // MSFS packages: group by the entry (sub model) a material comes from, in tree order
@@ -1399,10 +1410,10 @@ export default async () => {
         const gltf = state.gltf;
         materialSlots = getMaterialTextureSlots(gltf, index);
         app.materialTextures = materialSlots.map(({ slot }) => ({ ...slot, thumbnail: getThumbnail(slot.textureIndex) }));
-        app.materialFactors = materialEdits.getFactors(gltf, index);
+        app.materialEditor = buildEditorFor(index);
         app.materialEdited =
-            materialEdits.isEdited(index) || materialSlots.some(({ slot }) => slot.status === "off");
-        app.materialEditedCount = materialEdits.originals.size;
+            (materialDocs.get(index)?.changed.size ?? 0) > 0 || materialSlots.some(({ slot }) => slot.status === "off");
+        app.materialEditedCount = [...materialDocs.values()].filter((doc) => doc.changed.size > 0).length;
         const material = gltf.materials[index];
         const otherExtensions = Object.keys(material.extensions ?? {}).filter((name) => !name.startsWith("ASOBO_"));
         const info = [...(materialSections(gltf, index)[0]?.rows ?? [])];
@@ -1428,7 +1439,7 @@ export default async () => {
         if (index === undefined) {
             materialSlots = [];
             app.materialTextures = [];
-            app.materialFactors = [];
+            app.materialEditor = undefined;
             app.materialUsers = [];
             app.materialInfo = [];
             app.materialEdited = false;
@@ -1442,15 +1453,208 @@ export default async () => {
     uiModel.materialView.subscribe(() => applyMaterialView());
     uiModel.materialHidden.subscribe((indices) => setHiddenMaterials(indices));
 
-    uiModel.materialFactor.subscribe(({ key, value }) => {
-        if (app.materialsSelected === undefined) {
+    const isMsfsGltf = (gltf) =>
+        (gltf.extensionsUsed ?? []).some((name) => name.startsWith("ASOBO_")) ||
+        gltf.asset?.extensions?.ASOBO_normal_map_convention !== undefined;
+    // the material as loaded (package: with the viewer's extras, livery tint)
+    const loadedMaterialJson = (index) => state.gltf?.sourceMaterialsJson?.[index];
+    const materialModel = (index) =>
+        materialDocs.get(index)?.model ?? readMaterial(loadedMaterialJson(index), isMsfsGltf(state.gltf));
+
+    // Package materials can only use textures of their own file (saving maps the indices back).
+    function sourceTexturesOf(index) {
+        const path = loadedMaterialJson(index)?.extras?.msfsSource?.path;
+        return path === undefined ? undefined : msfsPackage.sourceTextures?.[path];
+    }
+    function textureLabel(textureIndex) {
+        const texture = state.gltf.textures[textureIndex];
+        const image = state.gltf.images[texture?.source];
+        const uri = typeof image?.uri === "string" ? decodeURIComponent(image.uri.split(/[\\/]/).pop()) : undefined;
+        return uri ?? image?.name ?? texture?.name ?? `texture ${textureIndex}`;
+    }
+    function buildEditorFor(index) {
+        if (loadedMaterialJson(index) === undefined) {
+            return undefined; // the renderer's default material
+        }
+        const gltf = state.gltf;
+        const fileTextures = sourceTexturesOf(index);
+        const indices = fileTextures ? [...new Set(fileTextures)] : gltf.textures.map((_, i) => i);
+        const textureChoices = indices
+            .map((textureIndex) => ({ index: textureIndex, label: textureLabel(textureIndex) }))
+            .sort((a, b) => a.label.localeCompare(b.label));
+        const describeTexture = (textureIndex) => {
+            const slot = materialSlots.find((entry) => entry.slot.textureIndex === textureIndex)?.slot;
+            const image = gltf.images[gltf.textures[textureIndex]?.source];
+            return {
+                file: textureLabel(textureIndex),
+                thumbnail: image?.isLoaded() ? getThumbnail(textureIndex) : undefined,
+                status: slot?.status ?? (image?.isLoaded() ? "ok" : "missing"),
+                viewerId: slot?.id,
+                rows: slot?.rows
+            };
+        };
+        return buildMaterialEditor(materialModel(index), {
+            msfs: isMsfsGltf(gltf),
+            changed: materialDocs.get(index)?.changed,
+            describeTexture,
+            textureChoices
+        });
+    }
+
+    // Applies an edit to the selected material: model -> glTF JSON -> renderer. Edits run one
+    // after the other (replacing a material may upload textures).
+    function editSelectedMaterial(edit) {
+        const index = app.materialsSelected;
+        if (index === undefined || loadedMaterialJson(index) === undefined) {
             return;
         }
-        materialEdits.set(state.gltf, app.materialsSelected, key, value);
-        app.materialFactors = materialEdits.getFactors(state.gltf, app.materialsSelected);
-        app.materialEdited = true;
-        app.materialEditedCount = materialEdits.originals.size;
-        redraw = true;
+        materialEditQueue = materialEditQueue.then(async () => {
+            let doc = materialDocs.get(index);
+            if (doc === undefined) {
+                doc = { model: materialModel(index), changed: new Set() };
+                materialDocs.set(index, doc);
+            }
+            edit(doc.model, doc.changed);
+            await view.replaceMaterial(state, index, writeMaterial(doc.model));
+            materialUsage = getMaterialUsage(state.gltf);
+            if (app.materialsSelected === index) {
+                refreshMaterialDetails();
+            }
+            redraw = true;
+        }).catch((error) => {
+            console.error("Editing the material failed", error);
+            app.error(`Editing the material failed: ${error?.message ?? error}`);
+        });
+    }
+
+    const ColorParams = new Set(["baseColor", "emissive", "SSSColor"]);
+    app.materialParamChanged.subscribe(({ param, value }) => {
+        editSelectedMaterial((model, changed) => {
+            if (param === "baseColorAlpha") {
+                model.params.baseColor = [...model.params.baseColor.slice(0, 3), value];
+                changed.add("baseColor");
+                return;
+            }
+            if (ColorParams.has(param)) {
+                const rgb = hexToLinear(value);
+                const old = model.params[param];
+                model.params[param] = old.length > 3 ? [...rgb, ...old.slice(3)] : rgb;
+            } else if (param === "glassWidth") {
+                model.params.glassWidth = value / 1000; // shown in millimeters
+            } else {
+                model.params[param] = value;
+            }
+            changed.add(param);
+        });
+    });
+    app.materialTypeChanged.subscribe((type) => {
+        editSelectedMaterial((model, changed) => {
+            changed.add("type");
+            setMaterialType(model, type).forEach((param) => changed.add(param));
+        });
+    });
+    app.materialTextureAssigned.subscribe(({ slot, textureIndex }) => {
+        editSelectedMaterial((model, changed) => {
+            if (textureIndex === undefined || textureIndex === "" || textureIndex === null) {
+                delete model.textures[slot];
+            } else {
+                const kept = model.textures[slot];
+                // the UV2 occlusion map uses texture coordinates 1 (see the exporter)
+                model.textures[slot] = { ...(kept ?? {}), index: Number(textureIndex), texCoord: slot === "Occlusion" ? 1 : (kept?.texCoord ?? 0) };
+                if (model.textures[slot].texCoord === 0) delete model.textures[slot].texCoord;
+            }
+            changed.add(`texture:${slot}`);
+        });
+    });
+
+    // Saving: the edited materials into their files, diff based (materialForSource)
+    async function readModelFile(path) {
+        if (loadedModelSource?.package) {
+            return await msfsPackage.presetFiles.text(path);
+        }
+        const mainFile = loadedModelSource?.mainFile;
+        const file = Array.isArray(mainFile) ? mainFile[1] : mainFile;
+        if (typeof file === "string") {
+            const response = await fetch(file);
+            if (!response.ok) throw new Error(`${file}: ${response.status}`);
+            return await response.text();
+        }
+        return await file.text();
+    }
+    function modelFileName() {
+        const mainFile = loadedModelSource?.mainFile;
+        if (Array.isArray(mainFile)) return mainFile[0].split("/").pop();
+        if (typeof mainFile === "string") return decodeURIComponent(mainFile.split(/[?#]/)[0].split("/").pop());
+        return mainFile?.name ?? "model.gltf";
+    }
+    async function buildSavedFiles() {
+        const byFile = new Map(); // path -> [{ sourceIndex, doc, toSource }]
+        for (const [index, doc] of materialDocs) {
+            if (doc.changed.size === 0) continue;
+            let path = modelFileName();
+            let sourceIndex = index;
+            let toSource = (textureIndex) => textureIndex;
+            if (loadedModelSource?.package) {
+                const source = loadedMaterialJson(index)?.extras?.msfsSource;
+                if (source === undefined) throw new Error(`Material ${index} has no source file`);
+                path = source.path;
+                sourceIndex = source.index;
+                const map = msfsPackage.sourceTextures[path] ?? [];
+                toSource = (textureIndex) => {
+                    const found = map.indexOf(textureIndex);
+                    return found < 0 ? undefined : found;
+                };
+            }
+            if (!byFile.has(path)) byFile.set(path, []);
+            byFile.get(path).push({ sourceIndex, doc, toSource });
+        }
+        const files = [];
+        for (const [path, entries] of byFile) {
+            const text = await readModelFile(path);
+            const json = JSON.parse(text);
+            const materials = new Map(
+                entries.map(({ sourceIndex, doc, toSource }) => [
+                    sourceIndex,
+                    materialForSource(json.materials[sourceIndex], doc.model, doc.changed, toSource)
+                ])
+            );
+            files.push({ path, text: replaceMaterialsInText(text, materials).text, count: entries.length });
+        }
+        return files;
+    }
+    let saveDirectory = undefined; // the folder chosen for "Save to folder" (this session)
+    app.materialSaveRequested.subscribe(async (mode) => {
+        try {
+            const files = await buildSavedFiles();
+            if (files.length === 0) {
+                app.warn("No edited materials to save.");
+                return;
+            }
+            const materialCount = files.reduce((sum, file) => sum + file.count, 0);
+            if (mode === "download") {
+                files.forEach(({ path, text }) => downloadText(path.split("/").pop(), text));
+                app.info(`Downloaded ${files.length} file(s) with ${materialCount} edited material(s).`);
+                return;
+            }
+            if (typeof window.showDirectoryPicker !== "function") {
+                app.error("This browser cannot write files into folders; use Download.");
+                return;
+            }
+            const permission = saveDirectory && (await saveDirectory.requestPermission({ mode: "readwrite" }));
+            if (permission !== "granted") {
+                saveDirectory = await window.showDirectoryPicker({ id: "msfs-material-save", mode: "readwrite" });
+            }
+            // package: paths are relative to the package root; single file: its folder
+            const written = await writeFilesToDirectory(
+                saveDirectory,
+                files.map(({ path, text }) => ({ path: loadedModelSource?.package ? path : path.split("/").pop(), text }))
+            );
+            app.info(`Saved ${materialCount} material(s) into ${written.length} file(s) in ${saveDirectory.name} (with .bak copies).`);
+        } catch (error) {
+            if (error?.name === "AbortError") return; // picker cancelled
+            console.error("Saving the materials failed", error);
+            app.error(`Saving failed: ${error?.message ?? error}`, 10000);
+        }
     });
 
     uiModel.materialTextureToggle.subscribe(({ id, enabled }) => {
@@ -1464,9 +1668,17 @@ export default async () => {
     });
 
     uiModel.materialReset.subscribe((index) => {
-        materialEdits.reset(state.gltf, index);
-        refreshMaterialDetails();
-        redraw = true;
+        materialEditQueue = materialEditQueue.then(async () => {
+            if (materialDocs.has(index)) {
+                materialDocs.delete(index);
+                await view.replaceMaterial(state, index, loadedMaterialJson(index));
+            }
+            for (const { bound } of materialSlots) {
+                if (bound !== undefined) bound.debugDisabled = false;
+            }
+            refreshMaterialDetails();
+            redraw = true;
+        });
     });
 
     // Texture viewer
@@ -1529,6 +1741,18 @@ export default async () => {
     }
 
     uiModel.materialTextureOpen.subscribe((id) => {
+        if (typeof id === "object" && id?.textureIndex !== undefined) {
+            Object.assign(app.textureViewer, {
+                open: true,
+                title: id.label,
+                file: textureLabel(id.textureIndex),
+                textureIndex: id.textureIndex,
+                channelHints: getChannelHints(id.slotPath ?? ""),
+                pixel: ""
+            });
+            loadTextureViewer();
+            return;
+        }
         const slot = materialSlots.find((entry) => entry.slot.id === id)?.slot;
         if (slot?.textureIndex === undefined) {
             return;
