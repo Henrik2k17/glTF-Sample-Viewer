@@ -306,16 +306,6 @@ const appCreated = createApp({
                 }
                 liElement.style.marginTop = "0px";
             }
-
-            // add github logo to tab-bar
-            var a = document.createElement("a");
-            a.href = "https://github.com/KhronosGroup/glTF-Sample-Viewer";
-            var img = document.createElement("img");
-            img.src = "assets/ui/GitHub-Mark-Light-32px.png";
-            img.style.width = "22px";
-            img.style.height = "22px";
-            ulElement.appendChild(a);
-            a.appendChild(img);
         });
     },
     computed: {
