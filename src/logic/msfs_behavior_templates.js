@@ -1,7 +1,7 @@
 // MSFS model behavior templates: loads a model's behavior XML (with its includes from the
 // ModelBehaviorDefs folders) and expands the templates into components, like the package
 // builder does. Only what the viewer emulates is kept: components (ID, Node) with their
-// visibility codes and animations; other outputs are counted.
+// visibility codes, animations, mouse rects and input events; other outputs are counted.
 //
 // Template language (as used by the SDK and Fenix templates):
 //   <Template Name> / <TemplateAlias>, <UseTemplate Name> with parameters as child elements,
@@ -72,6 +72,7 @@ class BehaviorExpander {
         this.defsRoots = defsRoots;
         this.templates = new Map();
         this.parameterFns = new Map();
+        this.inputEvents = new Map(); // <InputEvent ID> definitions, for <UseInputEvent ID>
         this.loadedFiles = new Map(); // path -> Promise<Document|undefined>
         this.problems = [];
     }
@@ -161,6 +162,11 @@ class BehaviorExpander {
                 if (fnName) {
                     this.parameterFns.set(fnName, child);
                 }
+            } else if (name === "inputevent") {
+                const id = attr(child, "ID");
+                if (id) {
+                    this.inputEvents.set(id, child);
+                }
             }
         }
     }
@@ -168,7 +174,8 @@ class BehaviorExpander {
     /**
      * Expands the behaviors of a model XML (<Behaviors> with <IncludeBase>/<Include>, or a
      * ModelBehaviors file). Returns { components, outputs } where components are
-     * { id, node, parent, visibility: [code], file } (parent: index or -1).
+     * { id, node, parent, visibility: [code], animations, mouseRects, inputEvents }
+     * (parent: index or -1).
      */
     async expandModel(modelXmlPath) {
         const doc = await this.loadDocument(modelXmlPath);
@@ -273,8 +280,37 @@ class BehaviorExpander {
                 this.count(context, "Animation");
                 return;
             }
+            case "mouserect": {
+                const mouseRect = mouseRectOf(element, scope);
+                if (mouseRect !== undefined) {
+                    this.componentOf(context).mouseRects.push(mouseRect);
+                }
+                this.count(context, "MouseRect");
+                return;
+            }
+            case "inputevent":
+                // an input event defined in place (definitions at the top of a file are collected before)
+                if (element.parentElement !== null && !["behaviors", "modelbehaviors"].includes(lower(element.parentElement))) {
+                    this.componentOf(context).inputEvents.push(...inputEventsOf(element, scope));
+                    this.count(context, "InputEvent");
+                }
+                return;
+            case "useinputevent": {
+                const id = substitute(attr(element, "ID") ?? "", scope);
+                const definition = this.inputEvents.get(id);
+                if (definition === undefined) {
+                    this.problem(`input event ${id} not found`);
+                } else {
+                    // the definition sees the parameters where it is used
+                    const inner = new Scope(scope);
+                    this.applyParameters(element, inner, "override", inner);
+                    this.componentOf(context).inputEvents.push(...inputEventsOf(definition, inner));
+                }
+                this.count(context, "InputEvent");
+                return;
+            }
             default:
-                // MouseRect, Material, Update, AnimationTriggers, InputEvent, ...: not emulated yet
+                // Material, Update, AnimationTriggers, ...: not emulated yet
                 this.count(context, element.localName);
         }
     }
@@ -286,7 +322,7 @@ class BehaviorExpander {
     /** The current component (a visibility outside of components gets an unnamed one). */
     componentOf(context) {
         if (context.component < 0) {
-            context.result.components.push({ id: "", node: "", parent: -1, visibility: [], animations: [] });
+            context.result.components.push(newComponent("", "", -1));
             context.component = context.result.components.length - 1;
         }
         return context.result.components[context.component];
@@ -300,13 +336,9 @@ class BehaviorExpander {
 
     expandComponent(element, scope, context) {
         const components = context.result.components;
-        components.push({
-            id: substitute(attr(element, "ID") ?? "", scope),
-            node: substitute(attr(element, "Node") ?? "", scope),
-            parent: context.component,
-            visibility: [],
-            animations: []
-        });
+        components.push(
+            newComponent(substitute(attr(element, "ID") ?? "", scope), substitute(attr(element, "Node") ?? "", scope), context.component)
+        );
         const inner = { ...context, component: components.length - 1, depth: context.depth + 1 };
         this.expandChildren(element, new Scope(scope), inner);
     }
@@ -577,13 +609,9 @@ class BehaviorExpander {
         const base = result.components.length;
         for (const component of childElements(section("Components") ?? root.ownerDocument.createElement("x"))) {
             const owner = attr(component, "OwnerID");
-            result.components.push({
-                id: attr(component, "ID") ?? "",
-                node: attr(component, "Node") ?? "",
-                parent: owner === null ? -1 : base + Number(owner),
-                visibility: [],
-                animations: []
-            });
+            result.components.push(
+                newComponent(attr(component, "ID") ?? "", attr(component, "Node") ?? "", owner === null ? -1 : base + Number(owner))
+            );
         }
         for (const visibility of childElements(section("VisibilityCodes") ?? root.ownerDocument.createElement("x"))) {
             const owner = Number(attr(visibility, "OwnerID"));
@@ -613,7 +641,119 @@ class BehaviorExpander {
             }
             result.outputs.Animation = (result.outputs.Animation ?? 0) + 1;
         }
+        const stringOf = (element) => {
+            if (element === undefined) {
+                return undefined;
+            }
+            const id = attr(element, "StringID");
+            const text = id !== null ? strings.get(id) : element.textContent;
+            return text === undefined ? undefined : text.replace(/\s+/g, " ").trim();
+        };
+        // <MouseRect OwnerID HighlightNodeId><Callback Type="CallbackCode"><IMCodeInstances><IMDefault StringID/>
+        // <IMDrag StringID/></IMCodeInstances></Callback><IMMouseFlagsInstances><IMDefault>Lock+WheelUp</IMDefault>
+        for (const rect of childElements(section("Mouserects") ?? root.ownerDocument.createElement("x"))) {
+            const component = result.components[base + Number(attr(rect, "OwnerID"))];
+            const callback = part(rect, "callback");
+            const instances = part(callback, "imcodeinstances");
+            const code =
+                instances !== undefined
+                    ? stringOf(part(instances, "imdefault") ?? childElements(instances)[0])
+                    : stringOf(part(callback, "code") ?? callback);
+            const flags = part(part(rect, "immouseflagsinstances"), "imdefault")?.textContent ?? part(rect, "mouseflags")?.textContent ?? "";
+            if (component !== undefined && code) {
+                component.mouseRects.push({
+                    code,
+                    flags: splitFlags(flags),
+                    tooltip: part(part(part(rect, "imtooltipsinstances"), "imdrag"), "tttitle")?.textContent.trim() ?? "",
+                    highlightNode: attr(rect, "HighlightNodeId") ?? attr(rect, "HighlightPartId") ?? ""
+                });
+            }
+            result.outputs.MouseRect = (result.outputs.MouseRect ?? 0) + 1;
+        }
+        // <InputEvents><Instances><InputEvent OwnerID ID><Value><Code StringID/><Units/></Value>
+        // <Inc|Dec|Set|Toggle><Code StringID/>
+        for (const event of section("InputEvents")?.getElementsByTagName("InputEvent") ?? []) {
+            const component = result.components[base + Number(attr(event, "OwnerID"))];
+            if (component !== undefined) {
+                const codes = {};
+                for (const action of InputEventActions) {
+                    const code = stringOf(part(part(event, action.toLowerCase()), "code"));
+                    if (code) {
+                        codes[action] = code;
+                    }
+                }
+                component.inputEvents.push({
+                    id: attr(event, "ID") ?? "",
+                    units: part(part(event, "value"), "units")?.textContent.trim() ?? "",
+                    codes
+                });
+            }
+            result.outputs.InputEvent = (result.outputs.InputEvent ?? 0) + 1;
+        }
     }
+}
+
+const newComponent = (id, node, parent) => ({ id, node, parent, visibility: [], animations: [], mouseRects: [], inputEvents: [] });
+
+// what an input event preset does: (B:ID) reads Value, (>B:ID_Inc) runs Inc, ...
+const InputEventActions = ["Value", "Inc", "Dec", "Set", "Toggle"];
+
+const part = (parent, name) => (parent === undefined ? undefined : childElements(parent).find((e) => lower(e) === name));
+
+const splitFlags = (text) =>
+    text
+        .split("+")
+        .map((flag) => flag.trim())
+        .filter((flag) => flag !== "");
+
+/**
+ * <MouseRect><MouseFlags>LeftSingle+WheelUp</MouseFlags><TooltipID/><CallbackCode><Code/> or
+ * <IMCodeInstances><IMDefault/>...</CallbackCode></MouseRect> (2024 interaction model instances;
+ * IMDefault is the code used outside of drag mode). Returns { code, flags, tooltip, highlightNode }.
+ */
+function mouseRectOf(element, scope) {
+    const text = (child) => (child === undefined ? undefined : substitute(child.textContent, scope).replace(/\s+/g, " ").trim());
+    const callback = part(element, "callbackcode");
+    if (callback === undefined) {
+        return undefined;
+    }
+    const instances = part(callback, "imcodeinstances");
+    const code =
+        instances !== undefined ? text(part(instances, "imdefault") ?? childElements(instances)[0]) : text(part(callback, "code") ?? callback);
+    if (!code) {
+        return undefined;
+    }
+    const flags = text(part(part(element, "immouseflagsinstances"), "imdefault")) ?? text(part(element, "mouseflags")) ?? "";
+    return {
+        code,
+        flags: splitFlags(flags),
+        tooltip: text(part(element, "tooltipid")) ?? text(part(element, "tooltiptitle")) ?? "",
+        highlightNode: text(part(element, "highlightnode")) ?? ""
+    };
+}
+
+/**
+ * <InputEvent ID><Presets><Preset ID><Value><Code/><Units/></Value><Inc><Code/></Inc>...
+ * Each preset is an event (B:<preset ID>); an input event without presets is one itself.
+ */
+function inputEventsOf(element, scope) {
+    const text = (child) => (child === undefined ? undefined : substitute(child.textContent, scope).replace(/\s+/g, " ").trim());
+    const presets = part(element, "presets");
+    const sources = presets !== undefined ? childElements(presets).filter((e) => lower(e) === "preset") : [element];
+    return sources.map((preset) => {
+        const codes = {};
+        for (const action of InputEventActions) {
+            const code = text(part(part(preset, action.toLowerCase()), "code"));
+            if (code) {
+                codes[action] = code;
+            }
+        }
+        return {
+            id: substitute(attr(preset, "ID") ?? "", scope),
+            units: text(part(part(preset, "value"), "units")) ?? "",
+            codes
+        };
+    });
 }
 
 function parametersMode(element) {

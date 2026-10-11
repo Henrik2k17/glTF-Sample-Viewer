@@ -37,7 +37,14 @@ import { app } from "./ui/ui.js";
 import { EMPTY, Observable, from, merge, of } from "rxjs";
 import { mergeMap, map, share, catchError, switchMap, tap } from "rxjs/operators";
 import { fillEnvironmentWithPaths } from "./model_path_provider.js";
-import { VariableStore, buildBehaviors, evaluateAnimations, evaluateVisibility } from "./logic/msfs_behavior.js";
+import {
+    VariableStore,
+    buildBehaviors,
+    evaluateAnimations,
+    evaluateVisibility,
+    formatTooltip,
+    interact
+} from "./logic/msfs_behavior.js";
 
 export default async () => {
     const canvas = document.getElementById("canvas");
@@ -631,10 +638,15 @@ export default async () => {
         state.triggerSelection = true;
         selectionAdditive = selection.additive === true;
         selectionHide = selection.hide === true;
+        selectionButton = selection.button ?? 0;
     });
     listenForRedraw(uiModel.selection);
 
     uiModel.moveSelection.subscribe((selection) => {
+        if (behaviorInteractActive()) {
+            behaviorHoverAt(selection);
+            return;
+        }
         if (selection.x === undefined || selection.y === undefined) {
             state.hoverPositions[0].x = undefined;
             state.hoverPositions[0].y = undefined;
@@ -893,9 +905,9 @@ export default async () => {
     // ---------------------------------------------------------------- MSFS model behaviors
     // Behavior tab: the behaviors of the loaded package, expanded from the templates.
     // Visibility codes hide nodes with KHR_node_visibility, so a hidden node hides its children
-    // like in the sim. Animation codes give the keyframe each animation goes to; the animation
-    // follows it at its Lag (keyframes per second) and is shown through the frame overrides of
-    // the Animations tab. Variable values are kept across preset reloads.
+    // like in the sim. Animation codes give the position (0 .. Length) each animation goes to;
+    // the animation follows it at its Lag (Length units per second) and is shown through the
+    // frame overrides of the Animations tab, scaled onto the glTF animation's keyframes. Variable values are kept across preset reloads.
     const behavior = {
         data: undefined,
         rows: [], // visibility rows
@@ -905,7 +917,12 @@ export default async () => {
         // animation entry id -> keyframe currently shown
         frames: new Map(),
         lastTick: undefined,
-        lastRowsRefresh: 0
+        lastRowsRefresh: 0,
+        // node index -> interaction entries whose mouse rect is that node
+        interactionsByNode: new Map(),
+        hovered: undefined, // interaction entry under the cursor
+        hoverTimer: undefined,
+        logId: 0
     };
 
     async function setupBehaviors(model) {
@@ -916,8 +933,13 @@ export default async () => {
         behavior.animationRows = [];
         behavior.frames = new Map();
         behavior.lastTick = undefined;
+        behavior.interactionsByNode = new Map();
+        setBehaviorHover(undefined);
         app.behaviorVisibility = [];
         app.behaviorAnimations = [];
+        app.behaviorInteractions = [];
+        app.behaviorLog = [];
+        app.behaviorTouched = [];
         app.behaviorVariables = [];
         app.behaviorProblems = [];
         app.behaviorFocus = "";
@@ -951,8 +973,8 @@ export default async () => {
         behavior.data = data;
         app.behaviorProblems = data.problems;
         app.behaviorStatus =
-            data.visibility.length === 0 && data.animations.length === 0
-                ? "The behaviors of this preset have no visibility or animation codes."
+            data.visibility.length === 0 && data.animations.length === 0 && data.interactions.length === 0
+                ? "The behaviors of this preset have no visibility, animation or mouse rect codes."
                 : "";
         const keysOf = (entry) => [
             ...new Set(entry.program.references.filter((ref) => !ref.write && ref.kind !== "O" && ref.kind !== "F").map((ref) => ref.key))
@@ -987,9 +1009,37 @@ export default async () => {
             code: entry.code,
             keys: keysOf(entry)
         }));
+        for (const entry of data.interactions) {
+            if (entry.node === undefined) {
+                continue;
+            }
+            if (!behavior.interactionsByNode.has(entry.node)) {
+                behavior.interactionsByNode.set(entry.node, []);
+            }
+            behavior.interactionsByNode.get(entry.node).push(entry);
+        }
+        app.behaviorInteractions = data.interactions.map((entry) => ({
+            id: entry.id,
+            ...groupOf(entry),
+            node: entry.node,
+            nodeName: entry.nodeName,
+            label: entry.nodeName,
+            nodeTitle:
+                entry.node === undefined
+                    ? `${entry.nodeName}: no node with this name in ${entry.itemName}`
+                    : `${entry.nodeName} (component ${entry.componentId})${entry.tooltip ? "\n" + entry.tooltip : ""}` +
+                      `\nMouse flags: ${entry.flags.join(", ") || "none"}\nClick: show in the Inspector`,
+            state: entry.node === undefined ? "missing" : "shown",
+            stateTitle: entry.node === undefined ? "The node was not found, the part can't be clicked in the view" : "Clickable in the view",
+            actions: interactionActions(entry),
+            code: entry.code,
+            codeTitle: entry.code,
+            keys: keysOf(entry)
+        }));
         refreshBehaviorVariables();
         applyBehaviorVisibility();
         applyBehaviorAnimations(true);
+        refreshPickableMouseRects();
     }
 
     function refreshBehaviorVariables() {
@@ -1004,6 +1054,7 @@ export default async () => {
             const reference = `(${variable.kind}:${label}${variable.unit ? ", " + variable.unit : ""})`;
             const visibilityUsers = variable.users.visibility.length;
             const animationUsers = variable.users.animations.length;
+            const interactionUsers = variable.users.interactions.length;
             return {
                 key: variable.key,
                 kind: variable.kind,
@@ -1011,10 +1062,11 @@ export default async () => {
                 label,
                 title: [
                     reference,
-                    `Read by ${count(visibilityUsers, "visibility code")} and ${count(animationUsers, "animation")} (click: list them)`,
+                    `Read by ${count(visibilityUsers, "visibility code")} and ${count(animationUsers, "animation")}` +
+                        `, used by ${count(interactionUsers, "mouse rect")} (click: list them)`,
                     variable.values.length > 0 ? `Compared with ${variable.values.join(", ")}` : undefined
                 ].filter((line) => line).join("\n"),
-                users: { visibility: visibilityUsers, animations: animationUsers },
+                users: { visibility: visibilityUsers, animations: animationUsers, interactions: interactionUsers },
                 boolean: variable.boolean,
                 values: variable.values,
                 value: Number(behavior.store.valueOf(variable.key, variable.unit)) || 0
@@ -1109,8 +1161,13 @@ export default async () => {
             if (entry.animation === undefined) {
                 continue;
             }
-            const frame = behavior.frames.get(entry.id) ?? 0;
             const panelEntry = behaviorAnimationEntry(entry.animation);
+            // the code's value runs over the behavior's Length, the sim plays that across the
+            // whole glTF animation, whose keyframes may span another range (Length 100, 200 frames)
+            let frame = behavior.frames.get(entry.id) ?? 0;
+            if (panelEntry !== undefined && entry.length > 0) {
+                frame = panelEntry.minFrame + (frame / entry.length) * (panelEntry.maxFrame - panelEntry.minFrame);
+            }
             if (panelEntry !== undefined) {
                 panelEntry.frame = frame;
                 panelEntry.active = true;
@@ -1257,10 +1314,260 @@ export default async () => {
     });
     app.behaviorVariablesReset.subscribe(() => {
         behavior.store.values.clear();
+        const data = behavior.data;
+        if (data !== undefined) {
+            for (const entry of [...data.visibility, ...data.animations, ...data.interactions, ...data.inputEvents.values()]) {
+                entry.componentState?.clear();
+            }
+        }
         refreshBehaviorVariables();
         applyBehaviorVisibility();
         applyBehaviorAnimations(false);
     });
+    // ---- interactions
+    // While the Behavior tab is open (and "Click parts in the view" is on), a click on a part
+    // with a mouse rect runs its callback code: press events, then release events a moment
+    // later so momentary buttons move. The wheel over such a part sends WheelUp / WheelDown
+    // instead of zooming. Mouse rects are often invisible meshes (_Mouse nodes), which the
+    // renderer then lets the picking pass see.
+
+    const behaviorInteractActive = () => app.behaviorOpen && app.behaviorInteract && behavior.data?.interactions.length > 0;
+
+    /** The mouse events a code reacts to ('LeftSingle' scmi ...). */
+    const handledEvents = (entry) => {
+        entry.handled ??= new Set([...entry.code.matchAll(/'([A-Za-z]+)'/g)].map((match) => match[1].toLowerCase()));
+        return entry.handled;
+    };
+    const ButtonEvents = [
+        { press: ["LeftSingle", "Lock"], release: ["LeftRelease", "Unlock"] },
+        { press: ["MiddleSingle"], release: ["MiddleRelease"] },
+        { press: ["RightSingle"], release: ["RightRelease"] }
+    ];
+    const eventsOf = (entry, names) => names.filter((name) => handledEvents(entry).has(name.toLowerCase()));
+
+    /** Buttons of an Interactions row: the clicks its code reacts to. */
+    function interactionActions(entry) {
+        const actions = [];
+        const left = eventsOf(entry, ButtonEvents[0].press);
+        if (left.length > 0) {
+            if (/\(M:Relative[XY]/i.test(entry.code)) {
+                // codes that look at where the part was clicked (upper / lower half...)
+                actions.push({ label: "click +", title: "Click its upper / right half", events: "left", mouse: 1 });
+                actions.push({ label: "click −", title: "Click its lower / left half", events: "left", mouse: -1 });
+            } else {
+                actions.push({ label: "click", title: `Click it (${left.join(", ")})`, events: "left" });
+            }
+        }
+        if (eventsOf(entry, ["RightSingle"]).length > 0) {
+            actions.push({ label: "right", title: "Right click", events: "right" });
+        }
+        if (eventsOf(entry, ["WheelUp"]).length > 0) {
+            actions.push({ label: "▲", title: "Mouse wheel up", events: ["WheelUp"] });
+        }
+        if (eventsOf(entry, ["WheelDown"]).length > 0) {
+            actions.push({ label: "▼", title: "Mouse wheel down", events: ["WheelDown"] });
+        }
+        return actions;
+    }
+
+    /** The interaction of a picked node: its mouse rect node, or the closest one above it. */
+    function interactionOfNode(nodeIndex) {
+        for (let node = nodeIndex; node !== undefined; node = msfsPackage.parents.get(node)) {
+            const entries = behavior.interactionsByNode.get(node);
+            if (entries !== undefined) {
+                return entries[0];
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * M:RelativeX / M:RelativeY: where the part was hit, from its centre, in the view's
+     * right / up directions (-1 .. 1 across the part).
+     */
+    function relativeMouse(entry, position) {
+        if (position === undefined || entry.node === undefined) {
+            return { relativeX: 0, relativeY: 0 };
+        }
+        const min = [0, 0, 0];
+        const max = [0, 0, 0];
+        Msfs.getNodeExtents(state.gltf, entry.node, min, max);
+        if (min[0] === Number.POSITIVE_INFINITY) {
+            return { relativeX: 0, relativeY: 0 };
+        }
+        const camera = state.userCamera.getTransformMatrix();
+        const delta = [0, 1, 2].map((i) => position[i] - (min[i] + max[i]) / 2);
+        const radius = Math.max((max[0] - min[0]) / 2, 1e-6);
+        const along = (offset) => (delta[0] * camera[offset] + delta[1] * camera[offset + 1] + delta[2] * camera[offset + 2]) / radius;
+        return { relativeX: along(0), relativeY: along(4) };
+    }
+
+    /** Runs the code of a mouse rect for some events and applies what it changed. */
+    function runInteraction(entry, events, mouse = {}) {
+        if (events.length === 0 || behavior.data === undefined) {
+            return;
+        }
+        const result = interact(behavior.data, behavior.store, entry, events, mouse);
+        // the Interactions sub-tab lists the variables clicks have set
+        const touched = [...result.writes].filter((key) => !app.behaviorTouched.includes(key));
+        if (touched.length > 0) {
+            app.behaviorTouched = [...app.behaviorTouched, ...touched];
+        }
+        const part = `${entry.itemName} / ${entry.nodeName} — ${events.join(", ")}`;
+        // a release or wheel step that did nothing after the same part's event isn't worth a line
+        const quiet = result.log.length === 0 && result.errors.length === 0;
+        if (!(quiet && app.behaviorLog[0]?.part.startsWith(`${entry.itemName} / ${entry.nodeName} — `))) {
+            app.behaviorLog = [
+                { id: ++behavior.logId, part, lines: result.log, error: result.errors[0] },
+                ...app.behaviorLog
+            ].slice(0, 30);
+        }
+        refreshBehaviorHoverText();
+        refreshBehaviorVariables();
+        applyBehaviorVisibility();
+        applyBehaviorAnimations(false);
+        redraw = true;
+    }
+
+    /** A press and, a moment later, the release. */
+    function clickInteraction(entry, button, mouse) {
+        const events = ButtonEvents[button] ?? ButtonEvents[0];
+        runInteraction(entry, eventsOf(entry, events.press), mouse);
+        const release = eventsOf(entry, events.release);
+        if (release.length > 0) {
+            setTimeout(() => {
+                if (behavior.data?.interactions[entry.id] === entry) {
+                    runInteraction(entry, release, mouse);
+                }
+            }, 150);
+        }
+    }
+
+    function behaviorClick(pickingResult, button) {
+        const entry = interactionOfNode(pickingResult.node?.gltfObjectIndex);
+        if (entry === undefined) {
+            return;
+        }
+        clickInteraction(entry, button, relativeMouse(entry, pickingResult.position));
+    }
+
+    app.behaviorInteractionRun.subscribe(({ id, events }) => {
+        const entry = behavior.data?.interactions[id];
+        const action = app.behaviorInteractions[id]?.actions.find((candidate) => candidate.events === events);
+        if (entry === undefined) {
+            return;
+        }
+        if (Array.isArray(events)) {
+            runInteraction(entry, eventsOf(entry, events));
+        } else {
+            const mouse = { relativeX: action?.mouse ?? 0, relativeY: action?.mouse ?? 0 };
+            clickInteraction(entry, events === "right" ? 2 : 0, mouse);
+        }
+    });
+
+    // The wheel over a clickable part runs its code (no zoom).
+    uiModel.inputHooks.wheel = (event) => {
+        const entry = behavior.hovered;
+        if (!behaviorInteractActive() || entry === undefined || event.deltaY === 0) {
+            return false;
+        }
+        const events = eventsOf(entry, [event.deltaY < 0 ? "WheelUp" : "WheelDown"]);
+        if (events.length === 0) {
+            return false;
+        }
+        runInteraction(entry, events);
+        return true;
+    };
+
+    // Hover: picked once the cursor rests (a hover pick draws the scene again, which costs
+    // as much as a frame on large packages), and cleared as soon as it moves.
+    function behaviorHoverAt(position) {
+        clearTimeout(behavior.hoverTimer);
+        state.hoverPositions[0].x = undefined;
+        state.hoverPositions[0].y = undefined;
+        if (position.x === undefined || position.y === undefined) {
+            setBehaviorHover(undefined);
+            return;
+        }
+        behavior.hoverTimer = setTimeout(() => {
+            const devicePixelRatio = window.devicePixelRatio || 1;
+            state.hoverPositions[0].x = Math.floor(position.x * devicePixelRatio);
+            state.hoverPositions[0].y = Math.floor(position.y * devicePixelRatio);
+            redraw = true;
+        }, 80);
+    }
+    state.hoverCallback = (pickingResult) => {
+        // one pick per rest
+        state.hoverPositions[0].x = undefined;
+        state.hoverPositions[0].y = undefined;
+        if (behaviorInteractActive()) {
+            setBehaviorHover(interactionOfNode(pickingResult.node?.gltfObjectIndex));
+        }
+    };
+
+    function setBehaviorHover(entry) {
+        if (behavior.hovered === entry) {
+            return;
+        }
+        behavior.hovered = entry;
+        canvas.style.cursor = entry !== undefined ? "pointer" : "";
+        refreshBehaviorHoverText();
+        highlights.behaviorNodes = entry === undefined ? new Set() : interactionHighlight(entry);
+        refreshHighlights();
+    }
+
+    function refreshBehaviorHoverText() {
+        const entry = behavior.hovered;
+        const tooltip = entry?.tooltip ? formatTooltip(entry.tooltip, behavior.data, behavior.store, entry) : "";
+        app.behaviorHover = entry === undefined ? "" : `${entry.itemName} / ${entry.nodeName}${tooltip ? " — " + tooltip : ""}`;
+    }
+
+    /** What moves when the part is clicked: the animations of its component, else the part. */
+    function interactionHighlight(entry) {
+        const indices = new Set(
+            behavior.data.animations
+                .filter((animation) => animation.componentState === entry.componentState && animation.animation !== undefined)
+                .map((animation) => animation.animation)
+        );
+        const nodes = getAnimatedTargets(state.gltf, app.msfsAnimations.filter((animation) => indices.has(animation.index))).nodes;
+        if (entry.highlightNode !== undefined) {
+            for (const index of collectSubtree(state.gltf, entry.highlightNode)) {
+                nodes.add(index);
+            }
+        }
+        return nodes;
+    }
+
+    /**
+     * While parts are clicked, only mouse rects can be picked (like in the sim, where other
+     * geometry doesn't stop the mouse): their nodes and what is below them, invisible meshes too.
+     */
+    function refreshPickableMouseRects() {
+        const active = behaviorInteractActive();
+        state.enableHover = active;
+        let nodes = undefined;
+        if (active) {
+            nodes = new Set();
+            for (const node of behavior.interactionsByNode.keys()) {
+                for (const index of collectSubtree(state.gltf, node)) {
+                    nodes.add(index);
+                }
+            }
+        }
+        state.pickingNodeIndices = nodes;
+        if (!active) {
+            clearTimeout(behavior.hoverTimer);
+            state.hoverPositions[0].x = undefined;
+            state.hoverPositions[0].y = undefined;
+            setBehaviorHover(undefined);
+        }
+        redraw = true;
+    }
+    app.$watch(() => behaviorInteractActive(), refreshPickableMouseRects);
+    app.behaviorInteractChanged.subscribe((enabled) => {
+        app.behaviorInteract = enabled;
+    });
+
     // a different livery reloads the shown preset with it
     app.packageLiveryChanged.subscribe((id) => {
         app.selectedPackageLivery = id;
@@ -1328,6 +1635,7 @@ export default async () => {
     const highlights = {
         inspectorNodes: new Set(),
         animationNodes: new Set(),
+        behaviorNodes: new Set(), // the clickable part under the cursor (Behavior tab)
         materialsMaterials: new Set(),
         animationMaterials: new Set()
     };
@@ -1335,7 +1643,8 @@ export default async () => {
         const empty = new Set();
         state.highlightedNodeIndices = new Set([
             ...(app.inspectorOpen ? highlights.inspectorNodes : empty),
-            ...(app.animationsOpen ? highlights.animationNodes : empty)
+            ...(app.animationsOpen ? highlights.animationNodes : empty),
+            ...(app.behaviorOpen ? highlights.behaviorNodes : empty)
         ]);
         state.highlightedMaterialIndices = new Set([
             ...(app.materialsOpen ? highlights.materialsMaterials : empty),
@@ -1343,7 +1652,7 @@ export default async () => {
         ]);
         redraw = true;
     }
-    app.$watch(() => [app.inspectorOpen, app.materialsOpen, app.animationsOpen].join(), refreshHighlights);
+    app.$watch(() => [app.inspectorOpen, app.materialsOpen, app.animationsOpen, app.behaviorOpen].join(), refreshHighlights);
 
     // Inspector: the selected node (and its subtree) is tinted in the view. While the tab is
     // open, clicking the model selects the part under the cursor; clicking empty space clears it.
@@ -1425,7 +1734,17 @@ export default async () => {
     let selectionAdditive = false;
     // Alt held on the last viewport click
     let selectionHide = false;
+    // mouse button of the last viewport click (0 left, 1 middle, 2 right)
+    let selectionButton = 0;
     state.selectionCallback = (pickingResult) => {
+        if (behaviorInteractActive()) {
+            behaviorClick(pickingResult, selectionButton);
+            return;
+        }
+        // the other tabs select with the left button only
+        if (selectionButton !== 0) {
+            return;
+        }
         if (app.animationsOpen && app.msfsAnimationMode) {
             const nodeIndex = pickingResult.node?.gltfObjectIndex;
             if (nodeIndex === undefined) {

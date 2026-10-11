@@ -3,10 +3,11 @@ import { Subject } from "rxjs";
 import "./sass.scss";
 import Buefy from "@ntohq/buefy-next";
 
-// collapseActiveTab ids of the Animations, Inspector and Materials tabs (index.html; Behavior is 9)
+// collapseActiveTab ids of the Animations, Inspector, Materials and Behavior tabs (index.html)
 const AnimationsTab = 3;
 const InspectorTab = 7;
 const MaterialsTab = 8;
+const BehaviorTab = 9;
 
 const appCreated = createApp({
     data() {
@@ -207,8 +208,14 @@ const appCreated = createApp({
             behaviorVisibility: [],
             // rows: { id, groupId, groupName, groupTitle, label, animation, name, frameText, code, keys, state }
             behaviorAnimations: [],
-            // rows: { key, kind, unit, label, title, users: { visibility, animations }, boolean, values, value }
+            // rows: { id, groupId, groupName, groupTitle, label, node, nodeName, flags, code, keys, state }
+            behaviorInteractions: [],
+            // rows: { key, kind, unit, label, title, users: { visibility, animations, interactions }, boolean, values, value }
             behaviorVariables: [],
+            behaviorInteract: true, // clicking parts in the viewport runs their mouse rect code
+            behaviorHover: "", // the clickable part under the cursor
+            behaviorLog: [], // what the last clicks did: { id, part, lines, error }
+            behaviorTouched: [], // keys of the variables clicks have set
             behaviorApply: true,
             behaviorAnimate: true, // animation codes drive the animations
             behaviorVariablesOpen: true,
@@ -222,6 +229,9 @@ const appCreated = createApp({
             behaviorApplyChanged: new Subject(),
             behaviorAnimateChanged: new Subject(),
             behaviorVariablesReset: new Subject(),
+            behaviorInteractChanged: new Subject(),
+            // { id, events } from the Interactions list: run a mouse rect's code like a click
+            behaviorInteractionRun: new Subject(),
             // Texture lookup folders (logic/texture_folders.js rows)
             textureFoldersSupported: true,
             textureFolders: [],
@@ -454,6 +464,9 @@ const appCreated = createApp({
         animationsOpen() {
             return this.activeTab === AnimationsTab && !this.tabContentHidden;
         },
+        behaviorOpen() {
+            return this.activeTab === BehaviorTab && !this.tabContentHidden && this.behaviorAvailable;
+        },
         // [{name, count, open, entries}] by name prefix; filtering shows all matches expanded
         msfsAnimationGroups() {
             const filter = this.msfsAnimationFilter.trim().toLowerCase().replace(/_/g, " ");
@@ -509,11 +522,14 @@ const appCreated = createApp({
             };
         },
         // the variables read by the codes of the open sub-tab
+        // (Interactions: the variables clicks have set so far)
         shownBehaviorVariables() {
             const filter = this.behaviorVariableFilter.trim().toLowerCase();
+            const touched = this.behaviorSubTab === "interactions" ? new Set(this.behaviorTouched) : undefined;
             return this.behaviorVariables.filter(
                 (variable) =>
-                    variable.users[this.behaviorSubTab] > 0 && (filter === "" || variable.key.toLowerCase().includes(filter))
+                    (touched !== undefined ? touched.has(variable.key) : variable.users[this.behaviorSubTab] > 0) &&
+                    (filter === "" || variable.key.toLowerCase().includes(filter))
             );
         },
         behaviorFocusLabel() {
@@ -525,7 +541,10 @@ const appCreated = createApp({
             const filter = this.behaviorFilter.trim().toLowerCase();
             const groups = [];
             const byId = new Map();
-            const rows = this.behaviorSubTab === "animations" ? this.behaviorAnimations : this.behaviorVisibility;
+            const rows = {
+                animations: this.behaviorAnimations,
+                interactions: this.behaviorInteractions
+            }[this.behaviorSubTab] ?? this.behaviorVisibility;
             for (const row of rows) {
                 if (this.behaviorFocus !== "" && !row.keys.includes(this.behaviorFocus)) {
                     continue;

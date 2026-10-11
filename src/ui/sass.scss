@@ -2006,3 +2006,48 @@ $checker: repeating-conic-gradient(#555 0% 25%, #3a3a3a 0% 50%) 50% / 12px 12px;
     opacity: 0.6;
     font-variant-numeric: tabular-nums;
 }
+// Behavior Interactions: buttons that click a mouse rect from the list, and the click log
+.behaviorClicks {
+    margin-left: 0.5em;
+    .behaviorValue + .behaviorValue { margin-left: 3px; }
+}
+.behaviorHover {
+    // the part under the cursor; one line, so the panel doesn't jump
+    contain: inline-size;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #b7e07f;
+}
+.behaviorLog {
+    contain: inline-size;
+    max-height: 12em;
+    overflow-y: auto;
+    margin-bottom: 0.5em;
+    padding: 4px 6px;
+    border: 1px solid #3a3a3a;
+    border-radius: 3px;
+    font-size: 11px;
+}
+.behaviorLogEntry {
+    padding: 2px 0;
+    & + & { border-top: 1px solid #333; }
+}
+.behaviorLogPart {
+    display: block;
+    color: #dcdcdc;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.behaviorLogLine {
+    display: block;
+    padding-left: 1em;
+    font-family: monospace;
+    color: #9fb8d0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.behaviorLogNone { opacity: 0.6; }
+.behaviorLogError { color: #e06c5a; }

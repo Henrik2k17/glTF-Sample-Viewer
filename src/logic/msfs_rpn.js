@@ -2,6 +2,7 @@
 //
 // Values are numbers or strings. Variables are read and written through an environment:
 //   env.get(ref) -> number | string, env.set(ref, value)
+//   env.params (optional): input event parameters, read by p0, p1, ...
 // where ref = { kind: "L", name, index, unit, key } ("(L:NAME, unit)", "(A:NAME:2, unit)",
 // "(O:NAME)", "(E:SIMULATION TIME, seconds)", ...). key identifies the variable: kind, name
 // and index, upper case (MSFS variable names are not case-sensitive).
@@ -39,6 +40,10 @@ function tokenize(code) {
             const stop = end < 0 ? length : end;
             tokens.push({ type: "string", value: code.substring(i + 1, stop) });
             i = stop + 1;
+            // a type suffix ('Name'_n) belongs to the string
+            while (i < length && code[i] > " " && code[i] !== "(" && code[i] !== ")") {
+                i++;
+            }
             continue;
         }
         let j = i;
@@ -76,31 +81,45 @@ function parseReference(text) {
     // "NAME:2" (simvar index); L: names may contain ':' (L:A320_Sound:ENG_1_N1), and
     // L:1:NAME (with an instance prefix) is the same variable as L:NAME here
     let index = "";
+    // (>K:2:EVENT): a key event taking 2 values from the stack
+    let count = 1;
+    if (kind === "K") {
+        const prefix = /^(\d+):/.exec(body);
+        if (prefix !== null) {
+            count = Number(prefix[1]);
+            body = body.substring(prefix[0].length);
+        }
+    }
     const colon = body.lastIndexOf(":");
     if (kind === "L") {
         body = body.replace(/^\d+:/, "");
+    } else if (kind === "K") {
+        // event names have no index
     } else if (colon > 0 && /^[\w' ]+$/.test(body.substring(colon + 1))) {
         index = body.substring(colon + 1).trim();
         body = body.substring(0, colon);
     }
     const name = body.trim();
     const key = `${kind}:${name.toUpperCase()}${index !== "" ? ":" + index.toUpperCase() : ""}`;
-    return { kind, name, index, unit, write, key };
+    return { kind, name, index, unit, write, key, count };
 }
 
 /**
  * Parses code once; returns a program that can be run many times.
- * Blocks (if{ ... } els{ ... }) are resolved to jump targets.
+ * Blocks (if{ ... } els{ ... }) are resolved to jump targets, labels (:N) for gotos (gN).
  */
 function compile(code) {
     const tokens = tokenize(code ?? "");
     const stack = [];
+    const labels = new Map();
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
         if (token.type !== "op") {
             continue;
         }
-        if (token.value === "if{" || token.value === "els{") {
+        if (/^:\d+$/.test(token.value)) {
+            labels.set(token.value.substring(1), i);
+        } else if (token.value === "if{" || token.value === "els{") {
             stack.push(i);
         } else if (token.value === "}") {
             const open = stack.pop();
@@ -112,7 +131,7 @@ function compile(code) {
             }
         }
     }
-    return { code, tokens, references: tokens.filter((token) => token.type === "var").map((token) => token.ref) };
+    return { code, tokens, labels, references: tokens.filter((token) => token.type === "var").map((token) => token.ref) };
 }
 
 // (F:...) functions: "value inMin inMax outMin outMax (F:MapRange)"
@@ -162,7 +181,14 @@ function run(program, env, maxSteps = 100000) {
                 continue;
             }
             if (token.ref.write) {
-                env.set(token.ref, pop());
+                if (token.ref.count > 1) {
+                    // several values, first pushed first
+                    const values = [];
+                    for (let k = 0; k < token.ref.count; k++) values.unshift(pop());
+                    env.set(token.ref, values);
+                } else {
+                    env.set(token.ref, pop());
+                }
             } else {
                 stack.push(env.get(token.ref));
             }
@@ -258,8 +284,19 @@ function run(program, env, maxSteps = 100000) {
                     registers[match[1]] = pop();
                 } else if ((match = /^l(\d+)$/.exec(op))) {
                     stack.push(registers[match[1]] ?? 0);
+                } else if ((match = /^p(\d+)$/.exec(op))) {
+                    stack.push(env.params?.[match[1]] ?? 0);
+                } else if ((match = /^g(\d+)$/.exec(op))) {
+                    // goto: continues after the label (blocks jumped out of need no closing)
+                    const target = program.labels?.get(match[1]);
+                    if (target === undefined) {
+                        error ??= `no label :${match[1]}`;
+                    } else {
+                        i = target;
+                    }
+                } else if (/^:\d+$/.test(op)) {
+                    // label
                 } else {
-                    // labels (gN / :N) and functions are not emulated yet
                     error ??= `unsupported "${op}"`;
                 }
             }

@@ -170,6 +170,8 @@ class UIModel {
         this.zoom = inputObservables.zoom;
         this.selection = inputObservables.selection;
         this.moveSelection = inputObservables.move;
+        // hooks.wheel(event) -> true when the viewer used the wheel event (no zoom then)
+        this.inputHooks = inputObservables.hooks;
     }
 
     attachGltfLoaded(gltfLoaded) {
@@ -341,8 +343,12 @@ const getInputObservables = (inputElement, app) => {
     inputElement.addEventListener("mousedown", (event) => {
         mouseDownPosition = { x: event.pageX, y: event.pageY };
     });
-    const selection = click.pipe(
-        filter((event) => event.button === 0),
+    // Middle and right clicks (auxclick) are selections too, with their button (most tabs
+    // only use the left one).
+    const selection = merge(
+        click.pipe(filter((event) => event.button === 0)),
+        fromEvent(inputElement, "auxclick").pipe(filter((event) => event.button === 1 || event.button === 2))
+    ).pipe(
         filter(
             (event) =>
                 Math.hypot(event.pageX - mouseDownPosition.x, event.pageY - mouseDownPosition.y) <= 4
@@ -351,6 +357,7 @@ const getInputObservables = (inputElement, app) => {
             return {
                 x: clickEvent.pageX,
                 y: clickEvent.pageY,
+                button: clickEvent.button,
                 // for adding to a selection in tabs that support several selected items
                 additive: clickEvent.ctrlKey || clickEvent.metaKey || clickEvent.shiftKey,
                 // for hiding the clicked part's material in the Materials tab
@@ -405,7 +412,9 @@ const getInputObservables = (inputElement, app) => {
         mergeMap(() => mouseMove.pipe(takeUntil(mouseUp))),
         map((mouse) => ({ deltaZoom: mouse.movementY }))
     );
+    const hooks = { wheel: undefined };
     const wheelZoom = fromEvent(inputElement, "wheel").pipe(
+        filter((wheelEvent) => hooks.wheel?.(wheelEvent) !== true),
         map((wheelEvent) => normalizeWheel(wheelEvent)),
         map((normalizedZoom) => ({ deltaZoom: normalizedZoom.spinY }))
     );
@@ -476,6 +485,7 @@ const getInputObservables = (inputElement, app) => {
     observables.zoom = merge(mouseZoom, touchZoom);
     observables.selection = selection;
     observables.move = move;
+    observables.hooks = hooks;
     // disable context menu
     inputElement.oncontextmenu = () => false;
 
