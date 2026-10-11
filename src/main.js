@@ -433,6 +433,8 @@ export default async () => {
         (night) => (state.renderingParameters.msfsNightLighting = night)
     );
     listenForRedraw(uiModel.msfsNightLighting);
+    uiModel.msfsF0Fade.subscribe((fade) => (state.renderingParameters.msfsF0Fade = fade));
+    listenForRedraw(uiModel.msfsF0Fade);
 
     // Emissive multiplier (Advanced Controls, or ?emissive=): scales the emissive of every
     // material, to tune the brightness by eye. Remembered per browser.

@@ -1126,6 +1126,8 @@
                                 <b-field label="MSFS" class="subtitle">
                                     <b-switch v-model="showMsfsInvisibleMaterials" v-on:input="showMsfsInvisibleMaterialsChanged.next($event.target.checked)">Show Invisible / Collision Meshes</b-switch>
                                     <b-switch v-model="msfsNightLighting" v-on:input="msfsNightLightingChanged.next($event.target.checked)">Night Lighting</b-switch>
+                                    <b-switch v-model="msfsF0Fade" v-on:input="msfsF0FadeChanged.next($event.target.checked)"
+                                        title="Like the sim, rough non-metals lose their reflection: F0 fades from 0.04 at roughness 0.5 to 0 at roughness 1 (affects every material)">Rough Dielectrics Lose Specular</b-switch>
                                     <div class="emissiveSettings" title="Multiplies the emissive of every material (logarithmic slider, 0.00001 to 1000; MSFS exports can have emissive factors like 20000). Remembered in this browser, also ?emissive= in the URL.">
                                         <span class="emissiveLabel">Emissive</span>
                                         <input type="range" class="emissiveSlider" min="-5" max="3" step="0.01" aria-label="Emissive multiplier"

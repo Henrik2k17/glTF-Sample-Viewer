@@ -37,6 +37,7 @@ const appCreated = createApp({
             floatingPointFramebufferChanged: new Subject(),
             showMsfsInvisibleMaterialsChanged: new Subject(),
             msfsNightLightingChanged: new Subject(),
+            msfsF0FadeChanged: new Subject(),
             emissiveMultiplierChanged: new Subject(),
             showMsfsCollidersChanged: new Subject(),
             showMsfsLightsChanged: new Subject(),
@@ -119,6 +120,7 @@ const appCreated = createApp({
             supportsFloatingPointFramebuffer: true,
             showMsfsInvisibleMaterials: false,
             msfsNightLighting: false,
+            msfsF0Fade: false,
             // multiplies every material's emissive (Advanced Controls), see main.js. The default
             // was tuned by eye against the sim (A32X).
             emissiveMultiplierDefault: 0.00537,

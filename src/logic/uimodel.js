@@ -63,6 +63,7 @@ class UIModel {
         this.floatingPointFramebufferEnabled = app.floatingPointFramebufferChanged.pipe();
         this.showMsfsInvisibleMaterials = app.showMsfsInvisibleMaterialsChanged.pipe();
         this.msfsNightLighting = app.msfsNightLightingChanged.pipe();
+        this.msfsF0Fade = app.msfsF0FadeChanged.pipe();
         this.showMsfsColliders = app.showMsfsCollidersChanged.pipe();
         this.showMsfsLights = app.showMsfsLightsChanged.pipe();
         this.msfsAnimationSelection = app.msfsAnimationSelectionChanged.pipe();
