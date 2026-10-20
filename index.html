@@ -990,6 +990,9 @@
                                         <label class="checkbox" title="While this tab is open, clicks and the mouse wheel on a clickable part run its code instead of selecting or zooming">
                                             <input type="checkbox" v-bind:checked="behaviorInteract" v-on:change="behaviorInteractChanged.next($event.target.checked)"> Click parts in the view
                                         </label>
+                                        <label class="checkbox" v-bind:title="behaviorUpdateCounts.periodic + ' update codes run at their frequency (knobs held with Lock, timers, buttons that spring back); ' + behaviorUpdateCounts.once + ' run once when the preset loads and after Reset variables' + (behaviorUpdateCounts.errors > 0 ? '\n' + behaviorUpdateCounts.errors + ' fail (see the console)' : '')">
+                                            <input type="checkbox" v-bind:checked="behaviorRunUpdates" v-on:change="behaviorRunUpdatesChanged.next($event.target.checked)"> Run update codes ({{ behaviorUpdateCounts.periodic }})<span v-if="behaviorUpdateCounts.errors > 0"> &#9888;</span>
+                                        </label>
                                         <button class="button is-small is-rounded is-outlined" title="Set every variable back to 0"
                                             v-on:click="behaviorVariablesReset.next(undefined)">Reset variables</button>
                                     </div>

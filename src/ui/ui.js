@@ -223,6 +223,8 @@ const appCreated = createApp({
             behaviorApply: true,
             behaviorAnimate: true, // animation codes drive the animations
             behaviorEmissiveApply: true, // emissive codes scale the emissive of their parts
+            behaviorRunUpdates: true, // periodic update codes run
+            behaviorUpdateCounts: { once: 0, periodic: 0, errors: 0 },
             behaviorVariablesOpen: true,
             behaviorVariableFilter: "",
             behaviorFilter: "",
@@ -234,6 +236,7 @@ const appCreated = createApp({
             behaviorApplyChanged: new Subject(),
             behaviorAnimateChanged: new Subject(),
             behaviorEmissiveApplyChanged: new Subject(),
+            behaviorRunUpdatesChanged: new Subject(),
             behaviorVariablesReset: new Subject(),
             behaviorInteractChanged: new Subject(),
             // { id, events } from the Interactions list: run a mouse rect's code like a click

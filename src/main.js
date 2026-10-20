@@ -44,7 +44,8 @@ import {
     evaluateEmissive,
     evaluateVisibility,
     formatTooltip,
-    interact
+    interact,
+    runUpdates
 } from "./logic/msfs_behavior.js";
 
 export default async () => {
@@ -917,6 +918,9 @@ export default async () => {
         animationRows: [],
         emissiveRows: [],
         lastEmissiveRefresh: 0,
+        // update entry id -> store.time the periodic update runs next
+        nextUpdate: new Map(),
+        lastVariablesRefresh: 0,
         store: new VariableStore(),
         generation: 0,
         // animation entry id -> keyframe currently shown
@@ -937,6 +941,7 @@ export default async () => {
         behavior.rows = [];
         behavior.animationRows = [];
         behavior.emissiveRows = [];
+        behavior.nextUpdate = new Map();
         state.nodeEmissiveScales = new Map();
         behavior.frames = new Map();
         behavior.lastTick = undefined;
@@ -945,6 +950,7 @@ export default async () => {
         app.behaviorVisibility = [];
         app.behaviorAnimations = [];
         app.behaviorEmissive = [];
+        app.behaviorUpdateCounts = { once: 0, periodic: 0, errors: 0 };
         app.behaviorInteractions = [];
         app.behaviorLog = [];
         app.behaviorTouched = [];
@@ -1056,6 +1062,13 @@ export default async () => {
             codeTitle: entry.code,
             keys: keysOf(entry)
         }));
+        app.behaviorUpdateCounts = {
+            once: data.updates.filter((entry) => entry.once).length,
+            periodic: data.updates.filter((entry) => !entry.once).length,
+            errors: 0
+        };
+        // like the sim when the aircraft loads: the Once codes set the initial states
+        runBehaviorUpdates(data.updates.filter((entry) => entry.once), false);
         refreshBehaviorVariables();
         applyBehaviorVisibility();
         applyBehaviorAnimations(true);
@@ -1145,6 +1158,69 @@ export default async () => {
         refreshShownMaterials();
         redraw = true;
     }
+
+    // ---- update codes
+    // Once codes run when the behaviors are set up and after "Reset variables"; the others run
+    // from the frame tick at their frequency (every frame without one). Their writes act like
+    // clicks: L: variables, component variables (O:) and input events (B:).
+
+    /** Runs update codes; when they changed something, the codes are evaluated again. */
+    function runBehaviorUpdates(entries, apply = true) {
+        const data = behavior.data;
+        if (data === undefined || entries.length === 0) {
+            return false;
+        }
+        const result = runUpdates(data, behavior.store, entries);
+        const errors = data.updates.filter((entry) => entry.error !== undefined).length;
+        if (errors !== app.behaviorUpdateCounts.errors) {
+            app.behaviorUpdateCounts = { ...app.behaviorUpdateCounts, errors };
+            if (result.errors.length > 0) {
+                console.warn("MSFS behavior update codes:", result.errors);
+            }
+        }
+        if (!result.changed) {
+            return false;
+        }
+        if (apply) {
+            const now = performance.now();
+            if (now - behavior.lastVariablesRefresh > 250) {
+                behavior.lastVariablesRefresh = now;
+                refreshBehaviorVariables();
+            }
+            applyBehaviorVisibility();
+            applyBehaviorAnimations(false);
+            applyBehaviorEmissive(undefined, false);
+        }
+        return true;
+    }
+
+    /** Per frame: the periodic update codes that are due. */
+    function tickBehaviorUpdates() {
+        const data = behavior.data;
+        if (data === undefined || !app.behaviorRunUpdates) {
+            return false;
+        }
+        const time = behavior.store.time;
+        const due = [];
+        for (const entry of data.updates) {
+            if (entry.once) {
+                continue;
+            }
+            const next = behavior.nextUpdate.get(entry.id) ?? 0;
+            if (time < next) {
+                continue;
+            }
+            due.push(entry);
+            const period = entry.frequency > 0 ? 1 / entry.frequency : 0;
+            // catch up at most one period when frames were slow
+            behavior.nextUpdate.set(entry.id, Math.max(next + period, time));
+        }
+        return runBehaviorUpdates(due);
+    }
+
+    app.behaviorRunUpdatesChanged.subscribe((run) => {
+        app.behaviorRunUpdates = run;
+    });
 
     // ---- emissive
     // Emissive codes scale the emissive of their node's meshes (state.nodeEmissiveScales); the
@@ -1308,7 +1384,7 @@ export default async () => {
         }
         behavior.store.deltaTime = deltaTime;
         behavior.store.time += deltaTime;
-        let changed = false;
+        let changed = tickBehaviorUpdates();
         const clockedEmissive = data.emissive.filter((entry) => entry.timeDependent);
         if (clockedEmissive.length > 0) {
             applyBehaviorEmissive(clockedEmissive, false);
@@ -1426,6 +1502,11 @@ export default async () => {
             for (const entry of [...data.visibility, ...data.animations, ...data.emissive, ...data.interactions, ...data.inputEvents.values()]) {
                 entry.componentState?.clear();
             }
+            for (const entry of data.updates) {
+                entry.componentState?.clear();
+            }
+            behavior.nextUpdate = new Map();
+            runBehaviorUpdates(data.updates.filter((entry) => entry.once), false);
         }
         refreshBehaviorVariables();
         applyBehaviorVisibility();

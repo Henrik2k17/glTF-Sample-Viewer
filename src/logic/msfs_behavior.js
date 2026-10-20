@@ -13,11 +13,12 @@ import { flattenTree } from "./msfs_package.js";
  * @param {object[]} items the attachment tree (wrapperNode set by assemblePreset)
  * @param {object[]} nodes the merged glTF's nodes (name, children)
  * @param {object[]} animations the merged glTF's animations (name, extras.msfsPackageItem)
- * @returns {Promise<object>} { visibility: [entry], animations: [entry], emissive: [entry], interactions: [entry],
+ * @returns {Promise<object>} { visibility: [entry], animations: [entry], emissive: [entry], updates: [entry], interactions: [entry],
  *   inputEvents, variables, problems, outputs }
  *   visibility entry: { id, itemId, itemName, componentId, nodeName, node, code, program }
  *   animation entry: { id, itemId, itemName, componentId, name, length, lag, wrap, animation, code, program }
  *   emissive entry: { id, itemId, itemName, componentId, nodeName, node, override, code, program }
+ *   update entry: { id, itemId, itemName, componentId, nodeName, once, frequency, interactionModel, code, program }
  *   interaction entry: { id, itemId, itemName, componentId, nodeName, node, flags, tooltip, code, program }
  *   inputEvents: Map<upper-case ID, { id, units, programs: { Value, Inc, Dec, Set, Toggle }, componentState }>
  *   variable: { key, kind, name, index, unit, users: { visibility: [id], animations: [id], emissive: [id], interactions: [id] },
@@ -35,6 +36,7 @@ async function buildBehaviors(preset, items, nodes, animations = [], progress = 
     const visibility = [];
     const animationEntries = [];
     const emissive = [];
+    const updates = [];
     const interactions = [];
     const inputEvents = new Map();
     const outputs = {};
@@ -61,6 +63,7 @@ async function buildBehaviors(preset, items, nodes, animations = [], progress = 
                     component.visibility.length === 0 &&
                     component.animations.length === 0 &&
                     component.emissive.length === 0 &&
+                    component.updates.length === 0 &&
                     component.mouseRects.length === 0 &&
                     component.inputEvents.length === 0
             )
@@ -128,6 +131,26 @@ async function buildBehaviors(preset, items, nodes, animations = [], progress = 
                     program: compile(material.code),
                     error: undefined,
                     value: undefined,
+                    componentState
+                });
+            }
+            for (const update of component.updates) {
+                // the sim's Drag interaction model is not emulated (clicks are Default / Lock)
+                if (update.interactionModel.toLowerCase() === "drag") {
+                    continue;
+                }
+                updates.push({
+                    id: updates.length,
+                    itemId: item.id,
+                    itemName: item.name,
+                    componentId: component.id,
+                    nodeName,
+                    once: update.once,
+                    frequency: update.frequency,
+                    interactionModel: update.interactionModel,
+                    code: update.code,
+                    program: compile(update.code),
+                    error: undefined,
                     componentState
                 });
             }
@@ -247,7 +270,7 @@ async function buildBehaviors(preset, items, nodes, animations = [], progress = 
     const sortedVariables = [...variables.values()].sort(
         (a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name) || a.index.localeCompare(b.index)
     );
-    return { visibility, animations: animationEntries, emissive, interactions, inputEvents, variables: sortedVariables, problems, outputs };
+    return { visibility, animations: animationEntries, emissive, updates, interactions, inputEvents, variables: sortedVariables, problems, outputs };
 }
 
 /**
@@ -381,6 +404,9 @@ function environmentOf(store, entry, behaviors, session = undefined, params = un
         },
         set: (ref, value) => {
             if (ref.kind === "O") {
+                if (session !== undefined && entry.componentState?.get(ref.key) !== value) {
+                    session.changed = true;
+                }
                 entry.componentState?.set(ref.key, value);
                 return;
             }
@@ -396,6 +422,7 @@ function environmentOf(store, entry, behaviors, session = undefined, params = un
                 store.set(ref, value);
                 session.writes.add(ref.key);
                 if (before !== store.get(ref)) {
+                    session.changed = true;
                     session.log.push(`${ref.kind}:${ref.name} = ${formatValue(store.get(ref))}`);
                 }
             }
@@ -449,13 +476,31 @@ function triggerInputEvent(name, value, store, behaviors, session) {
  * { writes: Set<variable key>, log: [line], errors: [message] }.
  */
 function interact(behaviors, store, entry, events, mouse = {}) {
-    const session = { writes: new Set(), log: [], errors: [], depth: 0, mouse: {} };
+    const session = newSession();
     for (const event of events) {
         session.mouse = { EVENT: event, RELATIVEX: mouse.relativeX ?? 0, RELATIVEY: mouse.relativeY ?? 0, DRAGPERCENT: mouse.dragPercent ?? 0 };
         const { error } = run(entry.program, environmentOf(store, entry, behaviors, session));
         entry.error = error;
         if (error !== undefined) {
             session.errors.push(error);
+        }
+    }
+    return session;
+}
+
+const newSession = () => ({ writes: new Set(), log: [], errors: [], depth: 0, mouse: {}, changed: false });
+
+/**
+ * Runs update codes (they write the store, component variables and input events like a
+ * callback). Returns the session: { writes, log, errors, changed }.
+ */
+function runUpdates(behaviors, store, entries) {
+    const session = newSession();
+    for (const entry of entries) {
+        const { error } = run(entry.program, environmentOf(store, entry, behaviors, session));
+        entry.error = error;
+        if (error !== undefined) {
+            session.errors.push(`${entry.itemName} / ${entry.nodeName || entry.componentId}: ${error}`);
         }
     }
     return session;
@@ -563,4 +608,4 @@ function formatTooltip(text, behaviors, store, entry) {
     return parse([])[0].replace(/^TT:/, "");
 }
 
-export { VariableStore, buildBehaviors, evaluateAnimations, evaluateEmissive, evaluateVisibility, formatTooltip, interact };
+export { VariableStore, buildBehaviors, evaluateAnimations, evaluateEmissive, evaluateVisibility, formatTooltip, interact, runUpdates };

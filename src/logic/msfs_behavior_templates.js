@@ -288,6 +288,14 @@ class BehaviorExpander {
                 this.count(context, "Material");
                 return;
             }
+            case "update": {
+                const code = substitute(element.textContent, scope).replace(/\s+/g, " ").trim();
+                if (code !== "") {
+                    this.componentOf(context).updates.push(updateOf(code, (name) => substitute(attr(element, name) ?? attr(element, name.toLowerCase()) ?? "", scope)));
+                }
+                this.count(context, "Update");
+                return;
+            }
             case "mouserect": {
                 const mouseRect = mouseRectOf(element, scope);
                 if (mouseRect !== undefined) {
@@ -318,7 +326,7 @@ class BehaviorExpander {
                 return;
             }
             default:
-                // Update, AnimationTriggers, FX, ...: not emulated yet
+                // AnimationTriggers, FX, ...: not emulated
                 this.count(context, element.localName);
         }
     }
@@ -668,6 +676,15 @@ class BehaviorExpander {
             }
             result.outputs.Material = (result.outputs.Material ?? 0) + 1;
         }
+        // <UpdateCodes><Update OwnerID StringID Once="True" | Frequency="20" InteractionModel/>
+        for (const update of childElements(section("UpdateCodes") ?? root.ownerDocument.createElement("x"))) {
+            const component = result.components[base + Number(attr(update, "OwnerID"))];
+            const code = stringOf(update);
+            if (component !== undefined && code) {
+                component.updates.push(updateOf(code, (name) => attr(update, name) ?? ""));
+            }
+            result.outputs.Update = (result.outputs.Update ?? 0) + 1;
+        }
         // <MouseRect OwnerID HighlightNodeId><Callback Type="CallbackCode"><IMCodeInstances><IMDefault StringID/>
         // <IMDrag StringID/></IMCodeInstances></Callback><IMMouseFlagsInstances><IMDefault>Lock+WheelUp</IMDefault>
         for (const rect of childElements(section("Mouserects") ?? root.ownerDocument.createElement("x"))) {
@@ -712,7 +729,30 @@ class BehaviorExpander {
     }
 }
 
-const newComponent = (id, node, parent) => ({ id, node, parent, visibility: [], animations: [], emissive: [], mouseRects: [], inputEvents: [] });
+const newComponent = (id, node, parent) => ({
+    id,
+    node,
+    parent,
+    visibility: [],
+    animations: [],
+    emissive: [],
+    updates: [],
+    mouseRects: [],
+    inputEvents: []
+});
+
+/**
+ * An update code: { code, once, frequency (per second; 0 = every frame), interactionModel
+ * ("Default", "Drag", "All" or "" = any) }. attribute(name) reads the element's attributes.
+ */
+function updateOf(code, attribute) {
+    return {
+        code,
+        once: attribute("Once").trim().toLowerCase() === "true",
+        frequency: Math.max(0, Number(attribute("Frequency").trim()) || 0),
+        interactionModel: attribute("InteractionModel").trim()
+    };
+}
 
 // what an input event preset does: (B:ID) reads Value, (>B:ID_Inc) runs Inc, ...
 const InputEventActions = ["Value", "Inc", "Dec", "Set", "Toggle"];
