@@ -2,9 +2,11 @@
 // attachment, binds the components to the nodes and animations of that attachment and
 // evaluates the visibility and animation codes against a variable store the user can change.
 // Mouse rects make parts clickable: their callback code runs on mouse events and writes L:
-// variables and input events (B:), which the codes read again.
+// variables and input events (B:), which the codes read again. Key events (K:) the codes send
+// change the simvars they stand for (msfs_key_events.js).
 
 import { BehaviorExpander } from "./msfs_behavior_templates.js";
+import { runKeyEvent } from "./msfs_key_events.js";
 import { comparedValues, compile, run, truthy } from "./msfs_rpn.js";
 import { flattenTree } from "./msfs_package.js";
 
@@ -270,7 +272,35 @@ async function buildBehaviors(preset, items, nodes, animations = [], progress = 
     const sortedVariables = [...variables.values()].sort(
         (a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name) || a.index.localeCompare(b.index)
     );
-    return { visibility, animations: animationEntries, emissive, updates, interactions, inputEvents, variables: sortedVariables, problems, outputs };
+    // simvar name -> the A: keys (with their indices) the codes read, where key events write
+    const simvarKeys = new Map();
+    const programs = [
+        ...[...visibility, ...animationEntries, ...emissive, ...updates, ...interactions].map((entry) => entry.program),
+        ...[...inputEvents.values()].flatMap((event) => Object.values(event.programs))
+    ];
+    for (const program of programs) {
+        for (const ref of program.references) {
+            if (ref.kind === "A" && !ref.write) {
+                const name = ref.name.toUpperCase();
+                if (!simvarKeys.has(name)) {
+                    simvarKeys.set(name, new Set());
+                }
+                simvarKeys.get(name).add(ref.key);
+            }
+        }
+    }
+    return {
+        visibility,
+        animations: animationEntries,
+        emissive,
+        updates,
+        interactions,
+        inputEvents,
+        simvarKeys,
+        variables: sortedVariables,
+        problems,
+        outputs
+    };
 }
 
 /**
@@ -416,7 +446,25 @@ function environmentOf(store, entry, behaviors, session = undefined, params = un
             if (ref.kind === "B") {
                 triggerInputEvent(ref.name, value, store, behaviors, session);
             } else if (ref.kind === "K") {
-                session.log.push(`K:${ref.name} ${[value].flat().map(formatValue).join(" ")}`);
+                const args = [value].flat();
+                const changes = runKeyEvent(ref.name, args, store, behaviors?.simvarKeys ?? new Map());
+                const call = `K:${ref.name} ${args.map(formatValue).join(" ")}`;
+                if (changes === undefined) {
+                    session.log.push(`${call} (not simulated)`);
+                    return;
+                }
+                const changed = changes.filter((change) => change.before !== change.after);
+                for (const change of changes) {
+                    session.writes.add(change.key);
+                }
+                if (changed.length > 0) {
+                    session.changed = true;
+                }
+                session.log.push(
+                    changed.length > 0
+                        ? `${call} → ${changed.map((change) => `${change.key} = ${formatValue(change.after)}`).join(", ")}`
+                        : call
+                );
             } else {
                 const before = store.get(ref);
                 store.set(ref, value);
