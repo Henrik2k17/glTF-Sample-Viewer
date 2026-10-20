@@ -949,6 +949,21 @@
                                         v-on:click="behaviorSubTab = 'interactions'">Interactions</button>
                                 </div>
                                 <p class="inspectorInfo" v-if="behaviorStatus">{{ behaviorStatus }}</p>
+                                <div class="behaviorToolbar behaviorDefs" v-if="behaviorDefsSupported && (behaviorDefsMissing || behaviorDefs.status !== 'none')">
+                                    <span class="inspectorInfo" v-bind:title="behaviorDefs.error || 'The MSFS SDK folder ModelBehaviorDefs (or the SDK folder): the Asobo templates that source behaviors include'">
+                                        <template v-if="behaviorDefs.status === 'none'">&#9888; Templates the package includes are missing: pick the SDK's ModelBehaviorDefs folder</template>
+                                        <template v-else-if="behaviorDefs.status === 'needsAccess'">SDK templates: {{ behaviorDefs.name }} needs access again</template>
+                                        <template v-else-if="behaviorDefs.status === 'scanning'">SDK templates: reading {{ behaviorDefs.name }}…</template>
+                                        <template v-else-if="behaviorDefs.status === 'error'">&#9888; SDK templates: {{ behaviorDefs.error }}</template>
+                                        <template v-else>SDK templates: {{ behaviorDefs.name }}<span v-if="behaviorDefs.fileCount !== undefined"> ({{ behaviorDefs.fileCount }} files)</span></template>
+                                    </span>
+                                    <button v-if="behaviorDefs.status === 'needsAccess'" class="button is-small is-rounded is-outlined"
+                                        v-on:click="behaviorDefsAccess.next(undefined)">Allow</button>
+                                    <button class="button is-small is-rounded is-outlined" title="Pick the ModelBehaviorDefs folder of the MSFS SDK (e.g. C:\MSFS 2024 SDK\ModelBehaviorDefs)"
+                                        v-on:click="behaviorDefsPick.next(undefined)">{{ behaviorDefs.status === 'none' ? 'Pick folder…' : 'Change…' }}</button>
+                                    <button v-if="behaviorDefs.status !== 'none' && behaviorDefs.fileCount !== undefined" class="button is-small is-rounded is-outlined" title="Forget this folder"
+                                        v-on:click="behaviorDefsClear.next(undefined)">&times;</button>
+                                </div>
                                 <details class="inspectorSummary" v-if="behaviorProblems.length > 0">
                                     <summary>&#9888; {{ behaviorProblems.length }} problems while expanding the templates</summary>
                                     <p v-for="(problem, problemIndex) in behaviorProblems" v-bind:key="problemIndex" class="behaviorProblem">{{ problem }}</p>

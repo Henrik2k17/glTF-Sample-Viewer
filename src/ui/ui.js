@@ -237,6 +237,13 @@ const appCreated = createApp({
             behaviorAnimateChanged: new Subject(),
             behaviorEmissiveApplyChanged: new Subject(),
             behaviorRunUpdatesChanged: new Subject(),
+            // SDK ModelBehaviorDefs folder (logic/behavior_defs.js): { name, status, fileCount, error }
+            behaviorDefs: { name: "", status: "none", fileCount: undefined, error: undefined },
+            behaviorDefsSupported: true,
+            behaviorDefsMissing: false, // a template include was not found
+            behaviorDefsPick: new Subject(),
+            behaviorDefsAccess: new Subject(),
+            behaviorDefsClear: new Subject(),
             behaviorVariablesReset: new Subject(),
             behaviorInteractChanged: new Subject(),
             // { id, events } from the Interactions list: run a mouse rect's code like a click

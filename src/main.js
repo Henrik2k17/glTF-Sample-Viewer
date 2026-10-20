@@ -22,6 +22,7 @@ import { materialForSource, replaceMaterialsInText, downloadText, writeFilesToDi
 import { buildMsfsAnimationEntries, findAnimationsForNode, getAnimatedTargets } from "./logic/msfs_animations.js";
 import { summarizeValidation } from "./logic/validation_summary.js";
 import { TextureFolders } from "./logic/texture_folders.js";
+import { BehaviorDefs } from "./logic/behavior_defs.js";
 import { PerfOverlay } from "./logic/perf_overlay.js";
 import {
     PackageFiles,
@@ -936,8 +937,33 @@ export default async () => {
         logId: 0
     };
 
+    // The SDK's ModelBehaviorDefs (Asobo templates for source behaviors): a folder picked once,
+    // or ?behaviorDefs=<url>. A change expands the shown preset's behaviors again.
+    const behaviorDefs = new BehaviorDefs((defsState) => (app.behaviorDefs = defsState));
+    app.behaviorDefsSupported = BehaviorDefs.isSupported();
+    const behaviorDefsParam = new URLSearchParams(window.location.search).get("behaviorDefs");
+    if (behaviorDefsParam) {
+        behaviorDefs.setUrl(behaviorDefsParam);
+    }
+    const behaviorDefsRestored = behaviorDefsParam ? Promise.resolve() : behaviorDefs.restore();
+    const reexpandBehaviors = () => {
+        if (behavior.model !== undefined) {
+            setupBehaviors(behavior.model);
+        }
+    };
+    // the picker and the permission prompt need the click: no await before them
+    app.behaviorDefsPick.subscribe(() => {
+        behaviorDefs
+            .pick()
+            .then((picked) => picked && reexpandBehaviors())
+            .catch((error) => (app.behaviorStatus = `The folder could not be opened: ${error.message}`));
+    });
+    app.behaviorDefsAccess.subscribe(() => behaviorDefs.requestAccess().then(reexpandBehaviors));
+    app.behaviorDefsClear.subscribe(() => behaviorDefs.clear().then(reexpandBehaviors));
+
     async function setupBehaviors(model) {
         const generation = ++behavior.generation;
+        behavior.model = model;
         releaseBehaviorAnimations();
         behavior.data = undefined;
         behavior.rows = [];
@@ -958,6 +984,7 @@ export default async () => {
         app.behaviorTouched = [];
         app.behaviorVariables = [];
         app.behaviorProblems = [];
+        app.behaviorDefsMissing = false;
         app.behaviorFocus = "";
         const preset = model?.package ? msfsPackage.presets.find((entry) => entry.id === model.presetId) : undefined;
         app.behaviorAvailable = preset !== undefined;
@@ -971,11 +998,13 @@ export default async () => {
         const animations = gltf.animations.map((animation) => ({ name: animation.name, extras: animation.extras }));
         let data;
         try {
-            data = await buildBehaviors(preset, msfsPackage.items, nodes, animations, (done, total) => {
+            await behaviorDefsRestored;
+            const progress = (done, total) => {
                 if (generation === behavior.generation) {
                     app.behaviorStatus = `Expanding the behavior templates ${done} / ${total}…`;
                 }
-            });
+            };
+            data = await buildBehaviors(preset, msfsPackage.items, nodes, animations, progress, behaviorDefs);
         } catch (error) {
             console.error("Expanding the behaviors failed", error);
             if (generation === behavior.generation) {
@@ -988,6 +1017,8 @@ export default async () => {
         }
         behavior.data = data;
         app.behaviorProblems = data.problems;
+        // includes of templates the package doesn't have: the SDK folder would have them
+        app.behaviorDefsMissing = data.problems.some((problem) => problem.includes("not found (ModelBehaviorDefs)"));
         app.behaviorStatus =
             data.visibility.length === 0 && data.animations.length === 0 && data.emissive.length === 0 && data.interactions.length === 0
                 ? "The behaviors of this preset have no visibility, animation, emissive or mouse rect codes."

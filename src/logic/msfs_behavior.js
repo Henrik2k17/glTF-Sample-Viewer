@@ -15,6 +15,9 @@ import { flattenTree } from "./msfs_package.js";
  * @param {object[]} items the attachment tree (wrapperNode set by assemblePreset)
  * @param {object[]} nodes the merged glTF's nodes (name, children)
  * @param {object[]} animations the merged glTF's animations (name, extras.msfsPackageItem)
+ * @param {function} progress called with (done, total) while expanding
+ * @param {object} defs behavior definitions outside the package (BehaviorDefs: text(path)
+ *   for a path under ModelBehaviorDefs), used when the package doesn't have the file
  * @returns {Promise<object>} { visibility: [entry], animations: [entry], emissive: [entry], updates: [entry], interactions: [entry],
  *   inputEvents, variables, problems, outputs }
  *   visibility entry: { id, itemId, itemName, componentId, nodeName, node, code, program }
@@ -26,10 +29,16 @@ import { flattenTree } from "./msfs_package.js";
  *   variable: { key, kind, name, index, unit, users: { visibility: [id], animations: [id], emissive: [id], interactions: [id] },
  *     values, boolean }
  */
-async function buildBehaviors(preset, items, nodes, animations = [], progress = undefined) {
+async function buildBehaviors(preset, items, nodes, animations = [], progress = undefined, defs = undefined) {
     const files = preset.files;
     const expander = new BehaviorExpander({
-        readFile: async (path) => (files.has(path) ? await files.text(path) : undefined),
+        readFile: async (path) => {
+            if (files.has(path)) {
+                return await files.text(path);
+            }
+            const defsPath = /^ModelBehaviorDefs\/(.*)$/i.exec(path);
+            return defsPath !== null && defs?.available ? await defs.text(defsPath[1]) : undefined;
+        },
         defsRoots: ["ModelBehaviorDefs"]
     });
     const all = flattenTree(items).map((row) => row.item);

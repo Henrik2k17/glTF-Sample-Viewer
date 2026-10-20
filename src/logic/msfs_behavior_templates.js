@@ -9,8 +9,11 @@
 //   <DefaultTemplateParameters>, <ParametersFn>/<UseParametersFn>/<ReturnParameters>,
 //   <Condition Check|Valid|NotEmpty [Match]> or <Condition><Test>...</Test>, <True>/<False>,
 //   <Switch Param> <Case Value> <Default>, <Loop><Setup>...</Setup><Do>, parameter
-//   Process="Int|Float|String|Param" and Lifetime="Loop|Iteration".
+//   Process="Int|Float|String|Param" and Lifetime="Loop|Iteration", <Macro Name> (@NAME).
 // Parameters are dynamically scoped: a template sees the parameters of its callers.
+// The sim's XML reader is lenient and the SDK templates rely on it: element names made of
+// parameters (<SET_STATE_#POS_ON#>, <#OUT_PARAM_NAME#>), numbers (<100>), HTML entities and
+// the odd mismatched closing tag; sanitizeBehaviorXml makes such files parseable.
 
 import { compile, run, truthy } from "./msfs_rpn.js";
 
@@ -33,11 +36,105 @@ function attr(element, name) {
 
 const childElements = (element) => [...element.children];
 const lower = (element) => element.localName.toLowerCase();
+// the element name as written (sanitizeBehaviorXml keeps names XML doesn't allow in an attribute)
+const nameOf = (element) => element.getAttribute(OriginalName) ?? element.localName;
+
+const OriginalName = "behavior-name";
+const ValidName = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
+const XmlEntities = new Set(["lt", "gt", "amp", "quot", "apos"]);
+const HtmlEntities = { deg: 176, nbsp: 160, plusmn: 177, micro: 181, middot: 183, times: 215, divide: 247, copy: 169, reg: 174 };
+
+/**
+ * Makes behavior XML parseable the way the sim reads it: an element name XML doesn't allow
+ * becomes <BehaviorParam behavior-name="...">, closing tags close the element that is open
+ * (whatever name they give), and HTML entities become characters.
+ */
+function sanitizeBehaviorXml(text) {
+    let out = "";
+    let i = 0;
+    const open = [];
+    const copyUntil = (start, terminator) => {
+        const end = text.indexOf(terminator, start);
+        const stop = end < 0 ? text.length : end + terminator.length;
+        out += text.substring(start, stop);
+        i = stop;
+    };
+    while (i < text.length) {
+        const lt = text.indexOf("<", i);
+        if (lt < 0) {
+            out += text.substring(i);
+            break;
+        }
+        out += text.substring(i, lt);
+        if (text.startsWith("<!--", lt)) {
+            copyUntil(lt, "-->");
+            continue;
+        }
+        if (text.startsWith("<![CDATA[", lt)) {
+            copyUntil(lt, "]]>");
+            continue;
+        }
+        if (text.startsWith("<?", lt) || text.startsWith("<!", lt)) {
+            copyUntil(lt, ">");
+            continue;
+        }
+        // the tag up to its ">" (not one inside a quoted attribute value)
+        let j = lt + 1;
+        let quote = undefined;
+        for (; j < text.length; j++) {
+            const c = text[j];
+            if (quote !== undefined) {
+                if (c === quote) {
+                    quote = undefined;
+                }
+            } else if (c === '"' || c === "'") {
+                quote = c;
+            } else if (c === ">") {
+                break;
+            }
+        }
+        const inner = text.substring(lt + 1, j);
+        i = j + 1;
+        if (inner.startsWith("/")) {
+            const name = open.pop();
+            if (name !== undefined) {
+                out += `</${name}>`;
+            }
+            continue;
+        }
+        const selfClosing = inner.endsWith("/");
+        const body = selfClosing ? inner.substring(0, inner.length - 1) : inner;
+        const match = /^\s*(\S+?)(\s[\s\S]*)?$/.exec(body);
+        if (match === null) {
+            out += `&lt;${inner}&gt;`;
+            continue;
+        }
+        let tag = match[1];
+        let extra = "";
+        if (!ValidName.test(tag)) {
+            extra = ` ${OriginalName}="${tag.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")}"`;
+            tag = "BehaviorParam";
+        }
+        out += `<${tag}${extra}${match[2] ?? ""}${selfClosing ? "/" : ""}>`;
+        if (!selfClosing) {
+            open.push(tag);
+        }
+    }
+    while (open.length > 0) {
+        out += `</${open.pop()}>`;
+    }
+    return out
+        .replace(/&(?!#[0-9]+;|#x[0-9A-Fa-f]+;|[A-Za-z][A-Za-z0-9]*;)/g, "&amp;") // a bare & (RPN bitwise and)
+        .replace(/&([A-Za-z][A-Za-z0-9]*);/g, (whole, name) =>
+            XmlEntities.has(name) ? whole : HtmlEntities[name] !== undefined ? `&#${HtmlEntities[name]};` : `&amp;${name};`
+        );
+}
 
 class Scope {
     constructor(parent = undefined) {
         this.parent = parent;
         this.values = new Map();
+        this.macros = parent?.macros; // <Macro Name> values (@NAME), shared by all scopes
     }
     has(name) {
         for (let scope = this; scope !== undefined; scope = scope.parent) {
@@ -73,6 +170,7 @@ class BehaviorExpander {
         this.templates = new Map();
         this.parameterFns = new Map();
         this.inputEvents = new Map(); // <InputEvent ID> definitions, for <UseInputEvent ID>
+        this.macros = new Map(); // <Macro Name> -> text, replacing @Name
         this.loadedFiles = new Map(); // path -> Promise<Document|undefined>
         this.problems = [];
     }
@@ -93,9 +191,8 @@ class BehaviorExpander {
                         return undefined;
                     }
                     // compiled behaviors name the code strings by number (<1820648769115568245>),
-                    // which XML parsers reject: prefix them (StringID "N" -> element "S_N")
-                    text = text.replace(/<(\/?)(\d+)(\s*\/?)>/g, "<$1S_$2$3>");
-                    const doc = new DOMParser().parseFromString(text, "text/xml");
+                    // templates name parameters with parameters: see sanitizeBehaviorXml
+                    const doc = new DOMParser().parseFromString(sanitizeBehaviorXml(text), "text/xml");
                     if (doc.querySelector("parsererror") !== null) {
                         this.problem(`${path}: not valid XML`);
                         return undefined;
@@ -167,6 +264,11 @@ class BehaviorExpander {
                 if (id) {
                     this.inputEvents.set(id, child);
                 }
+            } else if (name === "macro") {
+                const macroName = attr(child, "Name");
+                if (macroName) {
+                    this.macros.set(macroName, child.textContent.trim());
+                }
             }
         }
     }
@@ -203,6 +305,7 @@ class BehaviorExpander {
     async expandRoot(root, folder, result, depth = 0) {
         await this.collectDefinitions(root, folder, new Set());
         const scope = new Scope();
+        scope.macros = this.macros;
         const context = { result, component: -1, folder, depth: 0 };
         for (const child of childElements(root)) {
             const name = lower(child);
@@ -236,6 +339,7 @@ class BehaviorExpander {
         const name = lower(element);
         switch (name) {
             case "include":
+            case "macro":
             case "template":
             case "parametersfn":
             case "templatealias":
@@ -403,7 +507,8 @@ class BehaviorExpander {
             } else if (name === "templatealias" || name === "loop" || name === "test") {
                 // not parameters
             } else {
-                const parameter = child.localName;
+                // names may be made of parameters (<SET_STATE_#POS_ON#>) and macros
+                const parameter = substitute(nameOf(child), valueScope);
                 if (mode === "default" && scope.has(parameter)) {
                     continue;
                 }
@@ -575,7 +680,7 @@ class BehaviorExpander {
             const valueName = substitute(part("value")?.textContent.trim() ?? "", scope);
             for (const entry of childElements(list)) {
                 iterate((iteration) => {
-                    iteration.set(param, entry.localName);
+                    iteration.set(param, substitute(nameOf(entry), scope));
                     if (valueName !== "") {
                         iteration.set(valueName, substitute(entry.textContent.trim(), scope));
                     }
@@ -620,7 +725,7 @@ class BehaviorExpander {
         const section = (name) => childElements(root).find((e) => lower(e) === name.toLowerCase());
         const strings = new Map();
         for (const entry of childElements(section("Strings") ?? root.ownerDocument.createElement("x"))) {
-            strings.set(entry.localName.replace(/^S_/, ""), entry.textContent);
+            strings.set(nameOf(entry), entry.textContent);
         }
         const base = result.components.length;
         for (const component of childElements(section("Components") ?? root.ownerDocument.createElement("x"))) {
@@ -819,10 +924,10 @@ function parametersMode(element) {
     return (attr(element, "Type") ?? "Default").toLowerCase() === "override" ? "override" : "default";
 }
 
-/** #NAME# -> parameter value (repeated, values may contain parameters too). */
+/** #NAME# -> parameter value (repeated, values may contain parameters too), then @NAME -> macro. */
 function substitute(text, scope) {
     if (!text.includes("#")) {
-        return text;
+        return text.includes("@") ? substituteMacros(text, scope) : text;
     }
     for (let pass = 0; pass < 8; pass++) {
         let changed = false;
@@ -838,7 +943,16 @@ function substitute(text, scope) {
             break;
         }
     }
-    return text;
+    return text.includes("@") ? substituteMacros(text, scope) : text;
+}
+
+/** @NAME -> the macro's text (names that are no macro, e.g. @Sprintf, stay). */
+function substituteMacros(text, scope) {
+    const macros = scope?.macros;
+    if (macros === undefined || macros.size === 0) {
+        return text;
+    }
+    return text.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, (whole, name) => macros.get(name) ?? whole);
 }
 
 /** <Visibility><Parameter><Code>...</Code></Parameter></Visibility> (or Code directly). */
@@ -942,4 +1056,4 @@ function joinPath(folder, relative) {
     return parts.join("/");
 }
 
-export { BehaviorExpander, substitute, truthy };
+export { BehaviorExpander, sanitizeBehaviorXml, substitute, truthy };
