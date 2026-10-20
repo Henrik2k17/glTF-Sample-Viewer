@@ -9,8 +9,11 @@
 //   <DefaultTemplateParameters>, <ParametersFn>/<UseParametersFn>/<ReturnParameters>,
 //   <Condition Check|Valid|NotEmpty [Match]> or <Condition><Test>...</Test>, <True>/<False>,
 //   <Switch Param> <Case Value> <Default>, <Loop><Setup>...</Setup><Do>, parameter
-//   Process="Int|Float|String|Param" and Lifetime="Loop|Iteration", <Macro Name> (@NAME).
-// Parameters are dynamically scoped: a template sees the parameters of its callers.
+//   Process="Int|Float|String|Param" and Lifetime="Loop|Iteration", <Macro Name> (@NAME),
+//   saved parameter sets (<SaveParameters ID [Append="Default|Override"]>, <LoadParameters ID>,
+//   <RemoveSavedParameters ID>, CheckSavedParameters="ID"), <InputEvent><Presets><Extend Target>.
+// Parameters are dynamically scoped: a template sees the parameters of its callers. Saved
+// parameter sets are global to the expansion of a model, in document order.
 // The sim's XML reader is lenient and the SDK templates rely on it: element names made of
 // parameters (<SET_STATE_#POS_ON#>, <#OUT_PARAM_NAME#>), numbers (<100>), HTML entities and
 // the odd mismatched closing tag; sanitizeBehaviorXml makes such files parseable.
@@ -130,6 +133,9 @@ function sanitizeBehaviorXml(text) {
         );
 }
 
+// Parameter names ignore case (<GET_#IE_NAME#_SETTINGS_CONFIG> with IE_NAME "Armrest" is read
+// as GET_ARMREST_SETTINGS_CONFIG); the sim writes them upper case (a loop over <Windshield_Static/>
+// gives WINDSHIELD_STATIC), so values maps are keyed by the upper case name.
 class Scope {
     constructor(parent = undefined) {
         this.parent = parent;
@@ -137,23 +143,25 @@ class Scope {
         this.macros = parent?.macros; // <Macro Name> values (@NAME), shared by all scopes
     }
     has(name) {
+        const key = name.toUpperCase();
         for (let scope = this; scope !== undefined; scope = scope.parent) {
-            if (scope.values.has(name)) {
+            if (scope.values.has(key)) {
                 return true;
             }
         }
         return false;
     }
     get(name) {
+        const key = name.toUpperCase();
         for (let scope = this; scope !== undefined; scope = scope.parent) {
-            if (scope.values.has(name)) {
-                return scope.values.get(name);
+            if (scope.values.has(key)) {
+                return scope.values.get(key);
             }
         }
         return undefined;
     }
     set(name, value) {
-        this.values.set(name, value);
+        this.values.set(name.toUpperCase(), value);
     }
 }
 
@@ -167,10 +175,11 @@ class BehaviorExpander {
     constructor({ readFile, defsRoots = ["ModelBehaviorDefs"] }) {
         this.readFile = readFile;
         this.defsRoots = defsRoots;
-        this.templates = new Map();
+        this.templates = new Map(); // names ignore case (as parameter names): keyed upper case
         this.parameterFns = new Map();
         this.inputEvents = new Map(); // <InputEvent ID> definitions, for <UseInputEvent ID>
-        this.macros = new Map(); // <Macro Name> -> text, replacing @Name
+        this.macros = new Map(); // <Macro Name> (upper case: @16k is @16K) -> text, replacing @Name
+        this.savedParameters = new Map(); // <SaveParameters ID> (upper case) -> Map(name -> value), per model
         this.loadedFiles = new Map(); // path -> Promise<Document|undefined>
         this.problems = [];
     }
@@ -249,15 +258,15 @@ class BehaviorExpander {
             } else if (name === "template") {
                 const templateName = attr(child, "Name");
                 if (templateName) {
-                    this.templates.set(templateName, child);
+                    this.templates.set(templateName.toUpperCase(), child);
                     for (const alias of childElements(child).filter((e) => lower(e) === "templatealias")) {
-                        this.templates.set(alias.textContent.trim(), child);
+                        this.templates.set(alias.textContent.trim().toUpperCase(), child);
                     }
                 }
             } else if (name === "parametersfn") {
                 const fnName = attr(child, "Name");
                 if (fnName) {
-                    this.parameterFns.set(fnName, child);
+                    this.parameterFns.set(fnName.toUpperCase(), child);
                 }
             } else if (name === "inputevent") {
                 const id = attr(child, "ID");
@@ -267,7 +276,7 @@ class BehaviorExpander {
             } else if (name === "macro") {
                 const macroName = attr(child, "Name");
                 if (macroName) {
-                    this.macros.set(macroName, child.textContent.trim());
+                    this.macros.set(macroName.toUpperCase(), child.textContent.trim());
                 }
             }
         }
@@ -282,6 +291,7 @@ class BehaviorExpander {
     async expandModel(modelXmlPath) {
         const doc = await this.loadDocument(modelXmlPath);
         const result = { components: [], outputs: {}, compiled: false };
+        this.savedParameters = new Map();
         if (doc === undefined) {
             return result;
         }
@@ -346,7 +356,7 @@ class BehaviorExpander {
             case "defaulttemplateparameters":
                 return; // definitions (collected before) or handled by UseTemplate
             case "parameters":
-                this.applyParameters(element, scope, parametersMode(element));
+                this.applyBlock(element, scope, parametersMode(element), scope, context.loopScope);
                 return;
             case "condition":
                 this.expandBranch(this.conditionBranch(element, scope), scope, context);
@@ -355,12 +365,7 @@ class BehaviorExpander {
                 this.expandBranch(this.switchBranch(element, scope), scope, context);
                 return;
             case "loop":
-                this.runLoop(element, scope, (iteration) => {
-                    const body = childElements(element).find((e) => lower(e) === "do");
-                    if (body !== undefined) {
-                        this.expandChildren(body, iteration, context);
-                    }
-                });
+                this.runLoop(element, scope, (body, bodyScope, loopScope) => this.expandChildren(body, bodyScope, { ...context, loopScope }));
                 return;
             case "usetemplate":
                 this.useTemplate(element, scope, context);
@@ -401,7 +406,7 @@ class BehaviorExpander {
                 return;
             }
             case "mouserect": {
-                const mouseRect = mouseRectOf(element, scope);
+                const mouseRect = mouseRectOf(this.resolveOutput(element, scope), scope);
                 if (mouseRect !== undefined) {
                     this.componentOf(context).mouseRects.push(mouseRect);
                 }
@@ -411,7 +416,7 @@ class BehaviorExpander {
             case "inputevent":
                 // an input event defined in place (definitions at the top of a file are collected before)
                 if (element.parentElement !== null && !["behaviors", "modelbehaviors"].includes(lower(element.parentElement))) {
-                    this.componentOf(context).inputEvents.push(...inputEventsOf(element, scope));
+                    this.componentOf(context).inputEvents.push(...this.inputEventsOf(element, scope));
                     this.count(context, "InputEvent");
                 }
                 return;
@@ -424,7 +429,7 @@ class BehaviorExpander {
                     // the definition sees the parameters where it is used
                     const inner = new Scope(scope);
                     this.applyParameters(element, inner, "override", inner);
-                    this.componentOf(context).inputEvents.push(...inputEventsOf(definition, inner));
+                    this.componentOf(context).inputEvents.push(...this.inputEventsOf(definition, inner));
                 }
                 this.count(context, "InputEvent");
                 return;
@@ -459,13 +464,13 @@ class BehaviorExpander {
         components.push(
             newComponent(substitute(attr(element, "ID") ?? "", scope), substitute(attr(element, "Node") ?? "", scope), context.component)
         );
-        const inner = { ...context, component: components.length - 1, depth: context.depth + 1 };
+        const inner = { ...context, component: components.length - 1, depth: context.depth + 1, loopScope: undefined };
         this.expandChildren(element, new Scope(scope), inner);
     }
 
     useTemplate(element, scope, context) {
         const name = substitute(attr(element, "Name") ?? "", scope);
-        const template = this.templates.get(name);
+        const template = this.templates.get(name.toUpperCase());
         if (template === undefined) {
             this.problem(`template ${name} not found`);
             return;
@@ -477,10 +482,96 @@ class BehaviorExpander {
         for (const defaults of childElements(template).filter((e) => lower(e) === "defaulttemplateparameters")) {
             this.applyParameters(defaults, inner, "default");
         }
-        this.expandChildren(template, inner, { ...context, depth: context.depth + 1 });
+        this.expandChildren(template, inner, { ...context, depth: context.depth + 1, loopScope: undefined });
+    }
+
+    /**
+     * A copy of an output element (MouseRect, ...) with the template language in it resolved:
+     * Condition, Switch and Loop replaced by what they choose, parameter blocks
+     * (<Parameters Type>) applied, parameters substituted in texts and attributes.
+     */
+    resolveOutput(element, scope) {
+        const copy = element.cloneNode(false);
+        for (const attribute of [...copy.attributes]) {
+            copy.setAttribute(attribute.name, substitute(attribute.value, scope));
+        }
+        this.resolveChildren(copy, element, new Scope(scope));
+        return copy;
+    }
+
+    resolveChildren(target, source, scope) {
+        for (const node of source.childNodes) {
+            if (node.nodeType === Node.TEXT_NODE || node.nodeType === Node.CDATA_SECTION_NODE) {
+                target.appendChild(source.ownerDocument.createTextNode(substitute(node.data, scope)));
+                continue;
+            }
+            if (node.nodeType !== Node.ELEMENT_NODE) {
+                continue;
+            }
+            const name = lower(node);
+            if (name === "parameters" && attr(node, "Type") !== null) {
+                this.applyBlock(node, scope, parametersMode(node));
+            } else if (name === "condition" || name === "switch") {
+                const branch = name === "condition" ? this.conditionBranch(node, scope) : this.switchBranch(node, scope);
+                if (branch !== undefined) {
+                    this.resolveChildren(target, branch, scope);
+                }
+            } else if (name === "loop") {
+                this.runLoop(node, scope, (body, bodyScope) => this.resolveChildren(target, body, bodyScope));
+            } else {
+                target.appendChild(this.resolveOutput(node, scope));
+            }
+        }
+    }
+
+    /**
+     * The events of an <InputEvent>: each <Preset> of its <Presets> (B:<preset ID>), or the
+     * input event itself without presets. <Extend Target> takes the presets of the target
+     * input event, with the Extend's <Parameters> applied.
+     */
+    inputEventsOf(element, scope, depth = 0) {
+        const presets = part(element, "presets");
+        if (presets === undefined) {
+            return [inputEventOf(element, scope)];
+        }
+        const events = [];
+        for (const child of childElements(presets)) {
+            const name = lower(child);
+            if (name === "preset") {
+                events.push(inputEventOf(child, scope));
+            } else if (name === "extend") {
+                const target = substitute(attr(child, "Target") ?? "", scope);
+                const definition = this.inputEvents.get(target);
+                if (definition === undefined || depth > 8) {
+                    this.problem(`input event ${target} to extend not found`);
+                    continue;
+                }
+                const inner = new Scope(scope);
+                this.applyParameters(child, inner, "override", inner);
+                events.push(...this.inputEventsOf(definition, inner, depth + 1));
+            }
+        }
+        return events;
     }
 
     // ------------------------------------------------------------------ parameters
+
+    /**
+     * A <Parameters> (or <ReturnParameters>) block: its plain values read the parameters as
+     * they were before the block; tests, ParametersFn calls and saved sets also see what the
+     * block has set so far (applyParameter). Templates rely on it (<IE_NAME>#IE_NAME#_#UID#
+     * </IE_NAME> next to <BASE_IE_NAME>#IE_NAME#</BASE_IE_NAME>; loading a saved set, then
+     * testing and calling one of its parameters) and chain dependent values with several blocks.
+     */
+    applyBlock(block, scope, mode, valueScope = scope, loopScope = undefined) {
+        // Lifetime="Loop" (in a loop body): the parameters persist across the iterations
+        const target = (attr(block, "Lifetime") ?? "").toLowerCase() === "loop" && loopScope !== undefined ? loopScope : scope;
+        const staged = new Scope(target); // "default" sees target through it
+        this.applyParameters(block, staged, mode, valueScope, loopScope);
+        for (const [name, value] of staged.values) {
+            target.set(name, value);
+        }
+    }
 
     /**
      * Sets the parameters defined by the child elements of element. mode "default" only sets
@@ -489,34 +580,88 @@ class BehaviorExpander {
      */
     applyParameters(element, scope, mode, valueScope = scope, loopScope = undefined) {
         for (const child of childElements(element)) {
-            const name = lower(child);
-            if (name === "condition") {
-                const branch = this.conditionBranch(child, valueScope);
-                if (branch !== undefined) {
-                    this.applyParameters(branch, scope, mode, valueScope, loopScope);
+            this.applyParameter(child, scope, mode, valueScope, loopScope);
+        }
+    }
+
+    /** One child element of applyParameters. */
+    applyParameter(child, scope, mode, valueScope, loopScope) {
+        const name = lower(child);
+        // plain values read valueScope (in a block: the parameters before it), the rest also
+        // sees what the block has set so far (applyBlock)
+        const live = overlay(scope, valueScope);
+        if (name === "condition") {
+            const branch = this.conditionBranch(child, live);
+            if (branch !== undefined) {
+                this.applyParameters(branch, scope, mode, valueScope, loopScope);
+            }
+        } else if (name === "switch") {
+            const branch = this.switchBranch(child, live);
+            if (branch !== undefined) {
+                this.applyParameters(branch, scope, mode, valueScope, loopScope);
+            }
+        } else if (name === "parameters") {
+            this.applyBlock(child, scope, parametersMode(child), live, loopScope);
+        } else if (name === "useparametersfn") {
+            this.useParametersFn(child, scope, mode, live);
+        } else if (name === "loop") {
+            // <Parameters> in the body set the iteration's parameters (Lifetime="Loop": those of
+            // valueScope, not returned by a ParametersFn), the other elements set those of scope
+            this.runLoop(
+                child,
+                live,
+                (body, bodyScope, bodyLoopScope) => {
+                    for (const element of childElements(body)) {
+                        if (lower(element) === "parameters") {
+                            this.applyBlock(element, bodyScope, parametersMode(element), bodyScope, bodyLoopScope);
+                        } else {
+                            this.applyParameter(element, scope, mode, bodyScope, bodyLoopScope);
+                        }
+                    }
+                },
+                valueScope
+            );
+        } else if (name === "saveparameters") {
+            this.saveParameters(child, live);
+        } else if (name === "loadparameters") {
+            const saved = this.savedParameters.get(savedSetId(child, live));
+            for (const [key, value] of saved ?? []) {
+                if (mode !== "default" || !scope.has(key)) {
+                    scope.set(key, value);
                 }
-            } else if (name === "switch") {
-                const branch = this.switchBranch(child, valueScope);
-                if (branch !== undefined) {
-                    this.applyParameters(branch, scope, mode, valueScope, loopScope);
-                }
-            } else if (name === "parameters") {
-                this.applyParameters(child, scope, parametersMode(child), valueScope, loopScope);
-            } else if (name === "useparametersfn") {
-                this.useParametersFn(child, scope, mode, valueScope);
-            } else if (name === "templatealias" || name === "loop" || name === "test") {
-                // not parameters
-            } else {
-                // names may be made of parameters (<SET_STATE_#POS_ON#>) and macros
-                const parameter = substitute(nameOf(child), valueScope);
-                if (mode === "default" && scope.has(parameter)) {
-                    continue;
-                }
-                const value = this.parameterValue(child, valueScope);
-                const lifetime = (attr(child, "Lifetime") ?? attr(element, "Lifetime") ?? "").toLowerCase();
-                (lifetime === "loop" && loopScope !== undefined ? loopScope : scope).set(parameter, value);
+            }
+        } else if (name === "removesavedparameters") {
+            this.savedParameters.delete(savedSetId(child, live));
+        } else if (name === "templatealias" || name === "test") {
+            // not parameters
+        } else {
+            // names may be made of parameters (<SET_STATE_#POS_ON#>) and macros
+            const parameter = substitute(nameOf(child), valueScope);
+            if (mode === "default" && scope.has(parameter)) {
+                return;
+            }
+            const value = this.parameterValue(child, valueScope);
+            const lifetime = (attr(child, "Lifetime") ?? "").toLowerCase();
+            (lifetime === "loop" && loopScope !== undefined ? loopScope : scope).set(parameter, value);
+        }
+    }
+
+    /**
+     * <SaveParameters ID [Append]>: its parameters become the saved set ID (replacing it), or
+     * are added to it: Append="Override" replaces values, Append="Default" keeps existing ones.
+     */
+    saveParameters(element, scope) {
+        const id = savedSetId(element, scope);
+        const values = new Scope(scope);
+        this.applyParameters(element, values, "override", values);
+        const append = (attr(element, "Append") ?? "").toLowerCase();
+        const saved = append === "override" || append === "default" ? this.savedParameters.get(id) ?? new Map() : new Map();
+        for (const [key, value] of values.values) {
+            if (append !== "default" || !saved.has(key)) {
+                saved.set(key, value);
             }
         }
+        this.savedParameters.set(id, saved);
     }
 
     parameterValue(element, scope) {
@@ -525,9 +670,20 @@ class BehaviorExpander {
         switch (process) {
             case "int":
             case "float": {
-                const { value } = run(compile(text), { get: () => 0, set: () => {} });
+                const program = compile(text);
+                if (program.tokens.some((token) => token.type === "var" && token.ref.kind !== "F")) {
+                    // reads sim variables: the sim keeps it for run time ($f(...)), as RPN it
+                    // pushes the same value
+                    return text;
+                }
+                const { value } = run(program, { get: () => 0, set: () => {} });
                 const number = typeof value === "number" ? value : Number(value) || 0;
-                return String(process === "int" ? Math.trunc(number) : number);
+                // the sim writes floats with six decimals (%f)
+                return process === "int" ? String(Math.trunc(number)) : number.toFixed(6);
+            }
+            case "string": {
+                const { value } = run(compile(text), { get: () => 0, set: () => {} });
+                return String(value);
             }
             case "param":
                 return scope.get(text) ?? "";
@@ -538,19 +694,35 @@ class BehaviorExpander {
 
     useParametersFn(element, scope, mode, valueScope) {
         const name = substitute(attr(element, "Name") ?? "", valueScope);
-        const fn = this.parameterFns.get(name);
+        const fn = this.parameterFns.get(name.toUpperCase());
         if (fn === undefined) {
             this.problem(`ParametersFn ${name} not found`);
             return;
         }
         const inner = new Scope(valueScope);
         this.applyParameters(element, inner, "override", inner);
-        for (const block of childElements(fn).filter((e) => lower(e) === "parameters")) {
-            this.applyParameters(block, inner, parametersMode(block));
-        }
+        // the body: <Parameters> blocks in order (Condition / Switch may choose them), then the
+        // <ReturnParameters>
+        const returnBlocks = [];
+        const runBody = (body) => {
+            for (const block of childElements(body)) {
+                const name = lower(block);
+                if (name === "parameters") {
+                    this.applyBlock(block, inner, parametersMode(block));
+                } else if (name === "returnparameters") {
+                    returnBlocks.push(block);
+                } else if (name === "condition" || name === "switch") {
+                    const branch = name === "condition" ? this.conditionBranch(block, inner) : this.switchBranch(block, inner);
+                    if (branch !== undefined) {
+                        runBody(branch);
+                    }
+                }
+            }
+        };
+        runBody(fn);
         const returned = new Scope(inner);
-        for (const block of childElements(fn).filter((e) => lower(e) === "returnparameters")) {
-            this.applyParameters(block, returned, "override", returned);
+        for (const block of returnBlocks) {
+            this.applyBlock(block, returned, "override", inner);
         }
         for (const [key, value] of returned.values) {
             if (mode !== "default" || !scope.has(key)) {
@@ -574,31 +746,42 @@ class BehaviorExpander {
         return result ? trueBranch : falseBranch;
     }
 
-    /** Check / Valid / NotEmpty (+ Match) attributes of a Condition, Arg or Case. */
+    /**
+     * Check / Valid / NotEmpty (+ Match) attributes of a Condition, Arg or Case.
+     * CheckSavedParameters="ID": the saved set ID exists, and the other attributes test the
+     * parameters of that set (CheckSavedParameters="Saved_Input_Event_0" Check="BUTTON_TYPE").
+     */
     evaluateArg(element, scope) {
+        let target = scope;
+        const savedId = attr(element, "CheckSavedParameters");
+        if (savedId !== null) {
+            const saved = this.savedParameters.get(substitute(savedId, scope).toUpperCase());
+            if (saved === undefined) {
+                return false;
+            }
+            target = new Scope();
+            target.values = saved;
+        }
         const check = attr(element, "Check");
         if (check !== null) {
             const name = substitute(check, scope);
             const match = attr(element, "Match");
             if (match !== null) {
-                return scope.has(name) && String(scope.get(name)) === substitute(match, scope);
+                return target.has(name) && String(target.get(name)) === substitute(match, scope);
             }
-            return scope.has(name);
+            return target.has(name);
         }
         const valid = attr(element, "Valid");
         if (valid !== null) {
-            const value = scope.get(substitute(valid, scope));
+            const value = target.get(substitute(valid, scope));
             return value !== undefined && value !== "" && value.toLowerCase() !== "false" && value !== "0";
         }
         const notEmpty = attr(element, "NotEmpty");
         if (notEmpty !== null) {
-            const value = scope.get(substitute(notEmpty, scope));
+            const value = target.get(substitute(notEmpty, scope));
             return value !== undefined && value !== "";
         }
-        if (attr(element, "CheckSavedParameters") !== null || attr(element, "IsVersion") !== null) {
-            return false; // saved parameter stacks and versions are not emulated
-        }
-        return false;
+        return savedId !== null; // IsVersion: versions are not emulated
     }
 
     evaluateTest(element, scope) {
@@ -652,7 +835,13 @@ class BehaviorExpander {
 
     // ------------------------------------------------------------------ loops
 
-    runLoop(element, scope, body) {
+    /**
+     * Runs a <Loop>: body(<Do>, iteration scope, loopTarget) for each iteration, then
+     * body(<Then>, loop scope, loopTarget) once. Parameters with Lifetime="Loop" are set in
+     * loopTarget (the scope the loop reads): they persist across iterations and after the loop
+     * (a loop appending to EMISSIVE_CODE, used after it).
+     */
+    runLoop(element, scope, body, loopTarget = scope) {
         const setup = childElements(element).find((e) => lower(e) === "setup");
         if (setup === undefined) {
             return;
@@ -660,29 +849,34 @@ class BehaviorExpander {
         const part = (name) => childElements(setup).find((e) => lower(e) === name);
         const param = substitute(part("param")?.textContent.trim() ?? "", scope);
         const loopScope = new Scope(scope);
+        const doElement = childElements(element).find((e) => lower(e) === "do");
         const iterate = (setValues) => {
             const iteration = new Scope(loopScope);
             setValues(iteration);
-            const doElement = childElements(element).find((e) => lower(e) === "do");
-            // Parameters with Lifetime="Loop" in the body persist across iterations
             if (doElement !== undefined) {
-                for (const block of childElements(doElement).filter((e) => lower(e) === "parameters")) {
-                    if ((attr(block, "Lifetime") ?? "").toLowerCase() === "loop") {
-                        this.applyParameters(block, iteration, parametersMode(block), iteration, loopScope);
-                    }
-                }
+                body(doElement, iteration, loopTarget);
             }
-            body(iteration);
         };
+        this.loopIterations(part, param, scope, loopScope, iterate);
+        const thenElement = childElements(element).find((e) => lower(e) === "then");
+        if (thenElement !== undefined) {
+            body(thenElement, loopScope, loopTarget);
+        }
+    }
+
+    loopIterations(part, param, scope, loopScope, iterate) {
         const list = part("parameters");
         if (list !== undefined) {
             // <Param>NAME</Param><Value>VALUE_NAME</Value><Parameters><A>x</A>...: NAME = A, VALUE_NAME = x
+            // (the list may be built: <LoadParameters ID/>, Condition, ...)
             const valueName = substitute(part("value")?.textContent.trim() ?? "", scope);
-            for (const entry of childElements(list)) {
+            const entries = new Scope(scope);
+            this.applyParameters(list, entries, "override", entries);
+            for (const [name, value] of entries.values) {
                 iterate((iteration) => {
-                    iteration.set(param, substitute(nameOf(entry), scope));
+                    iteration.set(param, name);
                     if (valueName !== "") {
-                        iteration.set(valueName, substitute(entry.textContent.trim(), scope));
+                        iteration.set(valueName, value);
                     }
                 });
             }
@@ -696,7 +890,8 @@ class BehaviorExpander {
         const to = number("to", undefined);
         const step = number("inc", 1) || 1;
         const whileElement = part("while");
-        for (let value = from, guard = 0; guard < 1000; value += step, guard++) {
+        let value = from;
+        for (let guard = 0; guard < 1000; value += step, guard++) {
             if (to !== undefined && (step > 0 ? value > to : value < to)) {
                 break;
             }
@@ -708,8 +903,11 @@ class BehaviorExpander {
             if (to === undefined && whileElement === undefined) {
                 break;
             }
-            iterate((iteration) => iteration.set(param, String(value)));
+            const current = value;
+            iterate((iteration) => iteration.set(param, String(current)));
         }
+        // <Then> sees the value the loop stopped at (the number of iterations from 0)
+        loopScope.set(param, String(value));
     }
 
     // ------------------------------------------------------------------ compiled behaviors
@@ -896,54 +1094,67 @@ function mouseRectOf(element, scope) {
     };
 }
 
-/**
- * <InputEvent ID><Presets><Preset ID><Value><Code/><Units/></Value><Inc><Code/></Inc>...
- * Each preset is an event (B:<preset ID>); an input event without presets is one itself.
- */
-function inputEventsOf(element, scope) {
+/** <Preset ID><Value><Code/><Units/></Value><Inc><Code/></Inc>...: { id, units, codes }. */
+function inputEventOf(preset, scope) {
     const text = (child) => (child === undefined ? undefined : substitute(child.textContent, scope).replace(/\s+/g, " ").trim());
-    const presets = part(element, "presets");
-    const sources = presets !== undefined ? childElements(presets).filter((e) => lower(e) === "preset") : [element];
-    return sources.map((preset) => {
-        const codes = {};
-        for (const action of InputEventActions) {
-            const code = text(part(part(preset, action.toLowerCase()), "code"));
-            if (code) {
-                codes[action] = code;
-            }
+    const codes = {};
+    for (const action of InputEventActions) {
+        const code = text(part(part(preset, action.toLowerCase()), "code"));
+        if (code) {
+            codes[action] = code;
         }
-        return {
-            id: substitute(attr(preset, "ID") ?? "", scope),
-            units: text(part(part(preset, "value"), "units")) ?? "",
-            codes
-        };
-    });
+    }
+    return {
+        id: substitute(attr(preset, "ID") ?? "", scope),
+        units: text(part(part(preset, "value"), "units")) ?? "",
+        codes
+    };
+}
+
+/** The saved parameter set of a Save/Load/RemoveSavedParameters element (IDs ignore case: Enum_values is Enum_Values). */
+const savedSetId = (element, scope) => substitute(attr(element, "ID") ?? "", scope).toUpperCase();
+
+/** A scope reading the values set in top, then base. */
+function overlay(top, base) {
+    if (top === base) {
+        return base;
+    }
+    const view = new Scope(base);
+    view.values = top.values;
+    return view;
 }
 
 function parametersMode(element) {
     return (attr(element, "Type") ?? "Default").toLowerCase() === "override" ? "override" : "default";
 }
 
-/** #NAME# -> parameter value (repeated, values may contain parameters too), then @NAME -> macro. */
+/**
+ * #NAME# -> parameter value and @NAME -> macro, repeated (values and macros may contain
+ * parameters and macros too).
+ */
 function substitute(text, scope) {
-    if (!text.includes("#")) {
-        return text.includes("@") ? substituteMacros(text, scope) : text;
-    }
     for (let pass = 0; pass < 8; pass++) {
         let changed = false;
-        text = text.replace(/#([A-Za-z0-9_]+)#/g, (whole, name) => {
-            const value = scope.get(name);
-            if (value === undefined) {
-                return whole;
-            }
-            changed = true;
-            return value;
-        });
-        if (!changed || !text.includes("#")) {
+        if (text.includes("#")) {
+            text = text.replace(/#([A-Za-z0-9_]+)#/g, (whole, name) => {
+                const value = scope.get(name);
+                if (value === undefined) {
+                    return whole;
+                }
+                changed = true;
+                return value;
+            });
+        }
+        if (text.includes("@")) {
+            const expanded = substituteMacros(text, scope);
+            changed ||= expanded !== text;
+            text = expanded;
+        }
+        if (!changed) {
             break;
         }
     }
-    return text.includes("@") ? substituteMacros(text, scope) : text;
+    return text;
 }
 
 /** @NAME -> the macro's text (names that are no macro, e.g. @Sprintf, stay). */
@@ -952,7 +1163,7 @@ function substituteMacros(text, scope) {
     if (macros === undefined || macros.size === 0) {
         return text;
     }
-    return text.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, (whole, name) => macros.get(name) ?? whole);
+    return text.replace(/@([A-Za-z0-9_]+)/g, (whole, name) => macros.get(name.toUpperCase()) ?? whole);
 }
 
 /** <Visibility><Parameter><Code>...</Code></Parameter></Visibility> (or Code directly). */

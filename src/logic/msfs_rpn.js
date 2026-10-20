@@ -142,6 +142,35 @@ const Functions = {
     }
 };
 
+/** 'format' @sprintf / (F:Format): the format's arguments are on the stack, the first one pushed first. */
+function sprintf(format, pop) {
+    const specifiers = format.match(/%[-+ 0#]*\d*(?:\.\d+)?[sdifxXc]/g) ?? [];
+    const args = specifiers.map(() => pop()).reverse();
+    let index = 0;
+    return format.replace(/%%|%[-+ 0#]*\d*(?:\.(\d+))?([sdifxXc])/g, (whole, precision, type) => {
+        if (whole === "%%") {
+            return "%";
+        }
+        const value = args[index++];
+        switch (type) {
+            case "d":
+            case "i":
+                return String(Math.trunc(toNumber(value)));
+            case "f":
+                return toNumber(value).toFixed(precision === undefined ? 6 : Number(precision));
+            case "x":
+            case "X": {
+                const hex = Math.trunc(toNumber(value)).toString(16);
+                return type === "X" ? hex.toUpperCase() : hex;
+            }
+            case "c":
+                return typeof value === "string" ? value.charAt(0) : String.fromCharCode(value);
+            default:
+                return String(value);
+        }
+    });
+}
+
 const truthy = (value) => (typeof value === "string" ? value !== "" : value !== 0 && !Number.isNaN(value));
 const toNumber = (value) => (typeof value === "string" ? Number(value) || 0 : value);
 
@@ -171,7 +200,10 @@ function run(program, env, maxSteps = 100000) {
             if (token.ref.kind === "F" && !token.ref.write) {
                 // (F:Name) functions take their arguments from the stack
                 const fn = Functions[token.ref.name.toUpperCase()];
-                if (fn === undefined) {
+                if (token.ref.name.toUpperCase() === "FORMAT") {
+                    // 'format' (F:Format) (the SDK's @Sprintf macro): like @sprintf
+                    stack.push(sprintf(String(pop()), pop));
+                } else if (fn === undefined) {
                     error ??= `unsupported function F:${token.ref.name}`;
                 } else {
                     const args = [];
@@ -267,6 +299,13 @@ function run(program, env, maxSteps = 100000) {
             case "scmi": { const b = String(pop()).toLowerCase(); const a = String(pop()).toLowerCase(); stack.push(a < b ? -1 : a > b ? 1 : 0); break; }
             case "sstr": { const b = String(pop()); stack.push(String(pop()).indexOf(b)); break; }
             case "slen": stack.push(String(pop()).length); break;
+            case "uc": stack.push(String(pop()).toUpperCase()); break;
+            case "lc": stack.push(String(pop()).toLowerCase()); break;
+            case "cap": { const a = String(pop()); stack.push(a.charAt(0).toUpperCase() + a.substring(1)); break; }
+            case "chr": stack.push(String.fromCharCode(popNumber())); break;
+            case "ord": stack.push(String(pop()).charCodeAt(0) || 0); break;
+            case "scat": { const b = String(pop()); stack.push(String(pop()) + b); break; }
+            case "@sprintf": stack.push(sprintf(String(pop()), pop)); break;
             case "case": {
                 // "v(n-1) ... v1 v0 n selector case": picks v[selector], v0 pushed last
                 const selector = Math.trunc(popNumber());
