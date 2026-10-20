@@ -41,6 +41,7 @@ import {
     VariableStore,
     buildBehaviors,
     evaluateAnimations,
+    evaluateEmissive,
     evaluateVisibility,
     formatTooltip,
     interact
@@ -914,6 +915,8 @@ export default async () => {
         data: undefined,
         rows: [], // visibility rows
         animationRows: [],
+        emissiveRows: [],
+        lastEmissiveRefresh: 0,
         store: new VariableStore(),
         generation: 0,
         // animation entry id -> keyframe currently shown
@@ -933,12 +936,15 @@ export default async () => {
         behavior.data = undefined;
         behavior.rows = [];
         behavior.animationRows = [];
+        behavior.emissiveRows = [];
+        state.nodeEmissiveScales = new Map();
         behavior.frames = new Map();
         behavior.lastTick = undefined;
         behavior.interactionsByNode = new Map();
         setBehaviorHover(undefined);
         app.behaviorVisibility = [];
         app.behaviorAnimations = [];
+        app.behaviorEmissive = [];
         app.behaviorInteractions = [];
         app.behaviorLog = [];
         app.behaviorTouched = [];
@@ -975,8 +981,8 @@ export default async () => {
         behavior.data = data;
         app.behaviorProblems = data.problems;
         app.behaviorStatus =
-            data.visibility.length === 0 && data.animations.length === 0 && data.interactions.length === 0
-                ? "The behaviors of this preset have no visibility, animation or mouse rect codes."
+            data.visibility.length === 0 && data.animations.length === 0 && data.emissive.length === 0 && data.interactions.length === 0
+                ? "The behaviors of this preset have no visibility, animation, emissive or mouse rect codes."
                 : "";
         const keysOf = (entry) => [
             ...new Set(entry.program.references.filter((ref) => !ref.write && ref.kind !== "O" && ref.kind !== "F").map((ref) => ref.key))
@@ -1011,6 +1017,18 @@ export default async () => {
             code: entry.code,
             keys: keysOf(entry)
         }));
+        behavior.emissiveRows = data.emissive.map((entry) => ({
+            id: entry.id,
+            ...groupOf(entry),
+            node: entry.node,
+            nodeName: entry.nodeName,
+            label: entry.nodeName,
+            nodeTitle: entry.node === undefined
+                ? `${entry.nodeName}: no node with this name in ${entry.itemName}`
+                : `${entry.nodeName} (component ${entry.componentId})\nClick: show in the Inspector`,
+            code: entry.code,
+            keys: keysOf(entry)
+        }));
         for (const entry of data.interactions) {
             if (entry.node === undefined) {
                 continue;
@@ -1041,6 +1059,7 @@ export default async () => {
         refreshBehaviorVariables();
         applyBehaviorVisibility();
         applyBehaviorAnimations(true);
+        applyBehaviorEmissive();
         refreshPickableMouseRects();
     }
 
@@ -1056,6 +1075,7 @@ export default async () => {
             const reference = `(${variable.kind}:${label}${variable.unit ? ", " + variable.unit : ""})`;
             const visibilityUsers = variable.users.visibility.length;
             const animationUsers = variable.users.animations.length;
+            const emissiveUsers = variable.users.emissive.length;
             const interactionUsers = variable.users.interactions.length;
             return {
                 key: variable.key,
@@ -1064,11 +1084,11 @@ export default async () => {
                 label,
                 title: [
                     reference,
-                    `Read by ${count(visibilityUsers, "visibility code")} and ${count(animationUsers, "animation")}` +
+                    `Read by ${count(visibilityUsers, "visibility code")}, ${count(animationUsers, "animation")} and ${count(emissiveUsers, "emissive code")}` +
                         `, used by ${count(interactionUsers, "mouse rect")} (click: list them)`,
                     variable.values.length > 0 ? `Compared with ${variable.values.join(", ")}` : undefined
                 ].filter((line) => line).join("\n"),
-                users: { visibility: visibilityUsers, animations: animationUsers, interactions: interactionUsers },
+                users: { visibility: visibilityUsers, animations: animationUsers, emissive: emissiveUsers, interactions: interactionUsers },
                 boolean: variable.boolean,
                 values: variable.values,
                 value: Number(behavior.store.valueOf(variable.key, variable.unit)) || 0
@@ -1125,6 +1145,78 @@ export default async () => {
         refreshShownMaterials();
         redraw = true;
     }
+
+    // ---- emissive
+    // Emissive codes scale the emissive of their node's meshes (state.nodeEmissiveScales); the
+    // scale also applies to the nodes below it that have no emissive code of their own.
+
+    /** Evaluates the emissive codes (all, or the ones reading the clock) and applies them. */
+    function applyBehaviorEmissive(entries = undefined, forceRows = true) {
+        const data = behavior.data;
+        if (data === undefined || state.gltf === undefined) {
+            return;
+        }
+        const results = evaluateEmissive(data, behavior.store, entries ?? data.emissive);
+        const scales = new Map();
+        if (app.behaviorEmissiveApply) {
+            const spread = (nodeIndex, scale) => {
+                scales.set(nodeIndex, scale);
+                for (const child of state.gltf.nodes[nodeIndex]?.children ?? []) {
+                    if (!results.has(child)) {
+                        spread(child, scale);
+                    }
+                }
+            };
+            for (const [nodeIndex, scale] of results) {
+                spread(nodeIndex, scale);
+            }
+        }
+        state.nodeEmissiveScales = scales;
+        refreshBehaviorEmissiveRows(forceRows);
+        redraw = true;
+    }
+
+    /** The Emissive sub-tab rows (throttled when only clock codes changed). */
+    function refreshBehaviorEmissiveRows(force) {
+        const data = behavior.data;
+        if (data === undefined) {
+            app.behaviorEmissive = [];
+            return;
+        }
+        const now = performance.now();
+        if (!force && (now - behavior.lastEmissiveRefresh < 250 || app.behaviorSubTab !== "emissive")) {
+            return;
+        }
+        behavior.lastEmissiveRefresh = now;
+        app.behaviorEmissive = behavior.emissiveRows.map((row) => {
+            const entry = data.emissive[row.id];
+            let rowState = "shown";
+            let stateTitle = `Lit: emissive x ${formatScale(entry.scale)}`;
+            if (entry.node === undefined) {
+                rowState = "missing";
+                stateTitle = "The node was not found, the code has no effect";
+            } else if (!(entry.scale > 0)) {
+                rowState = "hidden";
+                stateTitle = app.behaviorEmissiveApply ? "Dark: the code is 0" : "The code is 0 (not applied)";
+            } else if (!app.behaviorEmissiveApply) {
+                stateTitle = `The code gives x ${formatScale(entry.scale)} (not applied)`;
+            }
+            return {
+                ...row,
+                state: rowState,
+                stateTitle,
+                valueText: `x ${formatScale(entry.scale ?? 0)}`,
+                codeTitle: `${entry.code}\n= ${entry.value}${entry.error ? "\n⚠ " + entry.error : ""}`
+            };
+        });
+    }
+
+    const formatScale = (value) => (Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, ""));
+
+    app.behaviorEmissiveApplyChanged.subscribe((apply) => {
+        app.behaviorEmissiveApply = apply;
+        applyBehaviorEmissive();
+    });
 
     // ---- animations
 
@@ -1211,11 +1303,20 @@ export default async () => {
         const now = performance.now();
         const deltaTime = behavior.lastTick === undefined ? 0 : Math.min(0.25, (now - behavior.lastTick) / 1000);
         behavior.lastTick = now;
-        if (data === undefined || !app.behaviorAnimate || data.animations.length === 0) {
+        if (data === undefined) {
             return false;
         }
         behavior.store.deltaTime = deltaTime;
         behavior.store.time += deltaTime;
+        let changed = false;
+        const clockedEmissive = data.emissive.filter((entry) => entry.timeDependent);
+        if (clockedEmissive.length > 0) {
+            applyBehaviorEmissive(clockedEmissive, false);
+            changed = true;
+        }
+        if (!app.behaviorAnimate || data.animations.length === 0) {
+            return changed;
+        }
         const clocked = data.animations.filter((entry) => entry.timeDependent);
         if (clocked.length > 0) {
             evaluateAnimations(data, behavior.store, clocked);
@@ -1243,7 +1344,7 @@ export default async () => {
             moved.push(entry);
         }
         if (moved.length === 0) {
-            return false;
+            return changed;
         }
         showBehaviorFrames(moved);
         // throttled while moving; the step that ends a movement always shows (codes reading the
@@ -1292,7 +1393,10 @@ export default async () => {
         });
     }
 
-    app.$watch("behaviorSubTab", () => refreshBehaviorAnimationRows(true));
+    app.$watch("behaviorSubTab", () => {
+        refreshBehaviorAnimationRows(true);
+        refreshBehaviorEmissiveRows(true);
+    });
 
     app.behaviorVariableChanged.subscribe(({ key, value }) => {
         const variable = app.behaviorVariables.find((entry) => entry.key === key);
@@ -1300,6 +1404,7 @@ export default async () => {
         app.behaviorVariables = app.behaviorVariables.map((entry) => (entry.key === key ? { ...entry, value } : entry));
         applyBehaviorVisibility();
         applyBehaviorAnimations(false);
+        applyBehaviorEmissive();
     });
     app.behaviorApplyChanged.subscribe((apply) => {
         app.behaviorApply = apply;
@@ -1318,13 +1423,14 @@ export default async () => {
         behavior.store.values.clear();
         const data = behavior.data;
         if (data !== undefined) {
-            for (const entry of [...data.visibility, ...data.animations, ...data.interactions, ...data.inputEvents.values()]) {
+            for (const entry of [...data.visibility, ...data.animations, ...data.emissive, ...data.interactions, ...data.inputEvents.values()]) {
                 entry.componentState?.clear();
             }
         }
         refreshBehaviorVariables();
         applyBehaviorVisibility();
         applyBehaviorAnimations(false);
+        applyBehaviorEmissive();
     });
     // ---- interactions
     // While the Behavior tab is open (and "Click parts in the view" is on), a click on a part
@@ -1428,6 +1534,7 @@ export default async () => {
         refreshBehaviorVariables();
         applyBehaviorVisibility();
         applyBehaviorAnimations(false);
+        applyBehaviorEmissive();
         redraw = true;
     }
 

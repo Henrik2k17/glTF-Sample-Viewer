@@ -280,6 +280,14 @@ class BehaviorExpander {
                 this.count(context, "Animation");
                 return;
             }
+            case "material": {
+                const emissive = emissiveOf(element, scope);
+                if (emissive !== undefined) {
+                    this.componentOf(context).emissive.push(emissive);
+                }
+                this.count(context, "Material");
+                return;
+            }
             case "mouserect": {
                 const mouseRect = mouseRectOf(element, scope);
                 if (mouseRect !== undefined) {
@@ -310,7 +318,7 @@ class BehaviorExpander {
                 return;
             }
             default:
-                // Material, Update, AnimationTriggers, ...: not emulated yet
+                // Update, AnimationTriggers, FX, ...: not emulated yet
                 this.count(context, element.localName);
         }
     }
@@ -649,6 +657,17 @@ class BehaviorExpander {
             const text = id !== null ? strings.get(id) : element.textContent;
             return text === undefined ? undefined : text.replace(/\s+/g, " ").trim();
         };
+        // <Material OwnerID><EmissiveFactor><Parameter><Code StringID/></Parameter></EmissiveFactor>
+        for (const material of childElements(section("Materials") ?? root.ownerDocument.createElement("x"))) {
+            const component = result.components[base + Number(attr(material, "OwnerID"))];
+            const factor = part(material, "emissivefactor");
+            const code = stringOf(part(part(factor, "parameter"), "code"));
+            if (component !== undefined && code) {
+                const override = part(factor, "overridebaseemissive")?.textContent ?? attr(factor, "OverrideBaseEmissive") ?? "True";
+                component.emissive.push({ code, override: override.trim().toLowerCase() !== "false" });
+            }
+            result.outputs.Material = (result.outputs.Material ?? 0) + 1;
+        }
         // <MouseRect OwnerID HighlightNodeId><Callback Type="CallbackCode"><IMCodeInstances><IMDefault StringID/>
         // <IMDrag StringID/></IMCodeInstances></Callback><IMMouseFlagsInstances><IMDefault>Lock+WheelUp</IMDefault>
         for (const rect of childElements(section("Mouserects") ?? root.ownerDocument.createElement("x"))) {
@@ -693,7 +712,7 @@ class BehaviorExpander {
     }
 }
 
-const newComponent = (id, node, parent) => ({ id, node, parent, visibility: [], animations: [], mouseRects: [], inputEvents: [] });
+const newComponent = (id, node, parent) => ({ id, node, parent, visibility: [], animations: [], emissive: [], mouseRects: [], inputEvents: [] });
 
 // what an input event preset does: (B:ID) reads Value, (>B:ID_Inc) runs Inc, ...
 const InputEventActions = ["Value", "Inc", "Dec", "Set", "Toggle"];
@@ -827,6 +846,28 @@ function animationOf(element, scope) {
         lag: Number(text(parameter, "lag") ?? attr(parameter, "Lag") ?? 0) || 0,
         wrap: (text(parameter, "wrap") ?? attr(parameter, "Wrap") ?? "").toLowerCase() === "true"
     };
+}
+
+/**
+ * <Material><EmissiveFactor><Parameter><Code/> (or <Sim>)</Parameter><OverrideBaseEmissive/>
+ * </EmissiveFactor></Material>. Returns { code, override } (undefined without a parameter).
+ */
+function emissiveOf(element, scope) {
+    const factor = part(element, "emissivefactor");
+    const parameter = part(factor, "parameter");
+    if (parameter === undefined) {
+        return undefined;
+    }
+    const text = (child) => (child === undefined ? undefined : substitute(child.textContent, scope).replace(/\s+/g, " ").trim());
+    let code = text(part(parameter, "code"));
+    const sim = part(parameter, "sim");
+    if (code === undefined && sim !== undefined) {
+        code = `(A:${text(part(sim, "variable")) ?? ""}, ${text(part(sim, "units")) || "number"}) ${text(part(sim, "scale")) || "1"} * ${text(part(sim, "bias")) || "0"} +`;
+    }
+    if (!code) {
+        return undefined;
+    }
+    return { code, override: (text(part(factor, "overridebaseemissive")) ?? "True").toLowerCase() !== "false" };
 }
 
 /** A condition without True/False: its children except the Test. */

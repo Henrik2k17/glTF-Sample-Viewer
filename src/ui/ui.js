@@ -210,9 +210,11 @@ const appCreated = createApp({
             behaviorVisibility: [],
             // rows: { id, groupId, groupName, groupTitle, label, animation, name, frameText, code, keys, state }
             behaviorAnimations: [],
+            // rows: { id, groupId, groupName, groupTitle, label, node, nodeName, valueText, code, keys, state }
+            behaviorEmissive: [],
             // rows: { id, groupId, groupName, groupTitle, label, node, nodeName, flags, code, keys, state }
             behaviorInteractions: [],
-            // rows: { key, kind, unit, label, title, users: { visibility, animations, interactions }, boolean, values, value }
+            // rows: { key, kind, unit, label, title, users: { visibility, animations, emissive, interactions }, boolean, values, value }
             behaviorVariables: [],
             behaviorInteract: true, // clicking parts in the viewport runs their mouse rect code
             behaviorHover: "", // the clickable part under the cursor
@@ -220,6 +222,7 @@ const appCreated = createApp({
             behaviorTouched: [], // keys of the variables clicks have set
             behaviorApply: true,
             behaviorAnimate: true, // animation codes drive the animations
+            behaviorEmissiveApply: true, // emissive codes scale the emissive of their parts
             behaviorVariablesOpen: true,
             behaviorVariableFilter: "",
             behaviorFilter: "",
@@ -230,6 +233,7 @@ const appCreated = createApp({
             behaviorVariableChanged: new Subject(),
             behaviorApplyChanged: new Subject(),
             behaviorAnimateChanged: new Subject(),
+            behaviorEmissiveApplyChanged: new Subject(),
             behaviorVariablesReset: new Subject(),
             behaviorInteractChanged: new Subject(),
             // { id, events } from the Interactions list: run a mouse rect's code like a click
@@ -515,6 +519,9 @@ const appCreated = createApp({
         behaviorHiddenCount() {
             return this.behaviorVisibility.filter((row) => row.state === "hidden" || row.state === "parent").length;
         },
+        behaviorDarkCount() {
+            return this.behaviorEmissive.filter((row) => row.state === "hidden").length;
+        },
         behaviorAnimationCounts() {
             const rows = this.behaviorAnimations;
             return {
@@ -545,6 +552,7 @@ const appCreated = createApp({
             const byId = new Map();
             const rows = {
                 animations: this.behaviorAnimations,
+                emissive: this.behaviorEmissive,
                 interactions: this.behaviorInteractions
             }[this.behaviorSubTab] ?? this.behaviorVisibility;
             for (const row of rows) {

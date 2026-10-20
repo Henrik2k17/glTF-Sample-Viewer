@@ -13,13 +13,14 @@ import { flattenTree } from "./msfs_package.js";
  * @param {object[]} items the attachment tree (wrapperNode set by assemblePreset)
  * @param {object[]} nodes the merged glTF's nodes (name, children)
  * @param {object[]} animations the merged glTF's animations (name, extras.msfsPackageItem)
- * @returns {Promise<object>} { visibility: [entry], animations: [entry], interactions: [entry],
+ * @returns {Promise<object>} { visibility: [entry], animations: [entry], emissive: [entry], interactions: [entry],
  *   inputEvents, variables, problems, outputs }
  *   visibility entry: { id, itemId, itemName, componentId, nodeName, node, code, program }
  *   animation entry: { id, itemId, itemName, componentId, name, length, lag, wrap, animation, code, program }
+ *   emissive entry: { id, itemId, itemName, componentId, nodeName, node, override, code, program }
  *   interaction entry: { id, itemId, itemName, componentId, nodeName, node, flags, tooltip, code, program }
  *   inputEvents: Map<upper-case ID, { id, units, programs: { Value, Inc, Dec, Set, Toggle }, componentState }>
- *   variable: { key, kind, name, index, unit, users: { visibility: [id], animations: [id], interactions: [id] },
+ *   variable: { key, kind, name, index, unit, users: { visibility: [id], animations: [id], emissive: [id], interactions: [id] },
  *     values, boolean }
  */
 async function buildBehaviors(preset, items, nodes, animations = [], progress = undefined) {
@@ -33,6 +34,7 @@ async function buildBehaviors(preset, items, nodes, animations = [], progress = 
     const itemsById = new Map(all.map((item) => [item.id, item]));
     const visibility = [];
     const animationEntries = [];
+    const emissive = [];
     const interactions = [];
     const inputEvents = new Map();
     const outputs = {};
@@ -58,6 +60,7 @@ async function buildBehaviors(preset, items, nodes, animations = [], progress = 
                 (component) =>
                     component.visibility.length === 0 &&
                     component.animations.length === 0 &&
+                    component.emissive.length === 0 &&
                     component.mouseRects.length === 0 &&
                     component.inputEvents.length === 0
             )
@@ -109,6 +112,22 @@ async function buildBehaviors(preset, items, nodes, animations = [], progress = 
                     error: undefined,
                     value: undefined,
                     target: undefined,
+                    componentState
+                });
+            }
+            for (const material of component.emissive) {
+                emissive.push({
+                    id: emissive.length,
+                    itemId: item.id,
+                    itemName: item.name,
+                    componentId: component.id,
+                    nodeName,
+                    node,
+                    override: material.override,
+                    code: material.code,
+                    program: compile(material.code),
+                    error: undefined,
+                    value: undefined,
                     componentState
                 });
             }
@@ -198,7 +217,7 @@ async function buildBehaviors(preset, items, nodes, animations = [], progress = 
                         name: ref.name,
                         index: ref.index,
                         unit: ref.unit,
-                        users: { visibility: [], animations: [], interactions: [] }
+                        users: { visibility: [], animations: [], emissive: [], interactions: [] }
                     };
                     variables.set(ref.key, variable);
                 }
@@ -210,21 +229,25 @@ async function buildBehaviors(preset, items, nodes, animations = [], progress = 
     };
     collect(visibility, "visibility");
     collect(animationEntries, "animations");
+    collect(emissive, "emissive");
     collect(interactions, "interactions", true);
-    for (const entry of [...visibility, ...animationEntries]) {
+    for (const entry of [...visibility, ...animationEntries, ...emissive]) {
         // codes reading the clock are evaluated every frame
         entry.timeDependent = entry.program.references.some((ref) => TimeVariables.has(ref.key));
     }
     for (const variable of variables.values()) {
         variable.values = [...(compared.get(variable.key) ?? [])].sort((a, b) => a - b);
-        // on/off when only compared with 0 and 1 and not used as a number by an animation
+        // on/off when only compared with 0 and 1 and not used as a number by an animation, or by
+        // an emissive code that never compares it (a brightness, e.g. A:AMBIENT LIGHT SENSOR)
         variable.boolean =
-            variable.values.every((value) => value === 0 || value === 1) && variable.users.animations.length === 0;
+            variable.values.every((value) => value === 0 || value === 1) &&
+            variable.users.animations.length === 0 &&
+            !(variable.users.emissive.length > 0 && variable.values.length === 0);
     }
     const sortedVariables = [...variables.values()].sort(
         (a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name) || a.index.localeCompare(b.index)
     );
-    return { visibility, animations: animationEntries, interactions, inputEvents, variables: sortedVariables, problems, outputs };
+    return { visibility, animations: animationEntries, emissive, interactions, inputEvents, variables: sortedVariables, problems, outputs };
 }
 
 /**
@@ -457,6 +480,29 @@ function evaluateVisibility(behaviors, store) {
 }
 
 /**
+ * Evaluates the emissive codes (all, or the given entries). Returns Map<node, scale>: the
+ * emissive of the node's meshes is multiplied with the value of its code (several codes on
+ * one node multiply). The sim's emissive is texture x emissive factor x vertex colour; the
+ * code scales that factor. OverrideBaseEmissive is not told apart (not verified in the sim).
+ */
+function evaluateEmissive(behaviors, store, entries = behaviors.emissive) {
+    for (const entry of entries) {
+        const { value, error } = run(entry.program, environmentOf(store, entry, behaviors));
+        const number = typeof value === "number" ? value : Number(value) || 0;
+        entry.value = value;
+        entry.error = error;
+        entry.scale = Number.isFinite(number) ? Math.max(0, number) : 0;
+    }
+    const nodes = new Map();
+    for (const entry of behaviors.emissive) {
+        if (entry.node !== undefined && entry.scale !== undefined) {
+            nodes.set(entry.node, (nodes.get(entry.node) ?? 1) * entry.scale);
+        }
+    }
+    return nodes;
+}
+
+/**
  * Evaluates every animation code: entry.target = the keyframe the animation goes to, the code
  * value clamped to [0, length] (wrapped into it with Wrap).
  */
@@ -517,4 +563,4 @@ function formatTooltip(text, behaviors, store, entry) {
     return parse([])[0].replace(/^TT:/, "");
 }
 
-export { VariableStore, buildBehaviors, evaluateAnimations, evaluateVisibility, formatTooltip, interact };
+export { VariableStore, buildBehaviors, evaluateAnimations, evaluateEmissive, evaluateVisibility, formatTooltip, interact };

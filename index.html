@@ -943,6 +943,8 @@
                                         v-on:click="behaviorSubTab = 'visibility'">Visibility</button>
                                     <button class="button is-small" v-bind:class="{ 'is-selected': behaviorSubTab === 'animations' }"
                                         v-on:click="behaviorSubTab = 'animations'">Animations</button>
+                                    <button class="button is-small" v-bind:class="{ 'is-selected': behaviorSubTab === 'emissive' }"
+                                        v-on:click="behaviorSubTab = 'emissive'">Emissive</button>
                                     <button class="button is-small" v-bind:class="{ 'is-selected': behaviorSubTab === 'interactions' }"
                                         v-on:click="behaviorSubTab = 'interactions'">Interactions</button>
                                 </div>
@@ -960,6 +962,19 @@
                                     <div class="behaviorToolbar">
                                         <label class="checkbox" title="Switch off to show every part as if it had no visibility code">
                                             <input type="checkbox" v-bind:checked="behaviorApply" v-on:change="behaviorApplyChanged.next($event.target.checked)"> Apply visibility codes
+                                        </label>
+                                        <button class="button is-small is-rounded is-outlined" title="Set every variable back to 0"
+                                            v-on:click="behaviorVariablesReset.next(undefined)">Reset variables</button>
+                                    </div>
+                                </template>
+                                <template v-else-if="behaviorSubTab === 'emissive'">
+                                    <p class="inspectorInfo">
+                                        {{ behaviorEmissive.length }} emissive codes &middot; {{ behaviorDarkCount }} dark
+                                        &middot; each code multiplies the emissive of its part and the parts below it
+                                    </p>
+                                    <div class="behaviorToolbar">
+                                        <label class="checkbox" title="Switch off to show every part with its material's own emissive">
+                                            <input type="checkbox" v-bind:checked="behaviorEmissiveApply" v-on:change="behaviorEmissiveApplyChanged.next($event.target.checked)"> Apply emissive codes
                                         </label>
                                         <button class="button is-small is-rounded is-outlined" title="Set every variable back to 0"
                                             v-on:click="behaviorVariablesReset.next(undefined)">Reset variables</button>
@@ -1036,7 +1051,7 @@
 
                                 <!-- Codes per attachment -->
                                 <div class="behaviorSection behaviorSectionStatic">
-                                    {{ { animations: 'Animation codes', interactions: 'Mouse rect codes' }[behaviorSubTab] || 'Visibility codes' }}
+                                    {{ { animations: 'Animation codes', emissive: 'Emissive codes', interactions: 'Mouse rect codes' }[behaviorSubTab] || 'Visibility codes' }}
                                     <span v-if="behaviorFocus" class="behaviorFocusNote">reading {{ behaviorFocusLabel }}
                                         <a v-on:click="behaviorFocus = ''">show all</a></span>
                                 </div>
@@ -1045,8 +1060,8 @@
                                     <div class="select is-small behaviorShowSelect" v-if="behaviorSubTab !== 'interactions'">
                                         <select v-model="behaviorShow" aria-label="Show">
                                             <option value="all">All</option>
-                                            <option value="hidden">{{ behaviorSubTab === 'animations' ? 'Moving' : 'Hidden' }}</option>
-                                            <option value="shown">{{ behaviorSubTab === 'animations' ? 'At keyframe' : 'Shown' }}</option>
+                                            <option value="hidden">{{ { animations: 'Moving', emissive: 'Dark' }[behaviorSubTab] || 'Hidden' }}</option>
+                                            <option value="shown">{{ { animations: 'At keyframe', emissive: 'Lit' }[behaviorSubTab] || 'Shown' }}</option>
                                         </select>
                                     </div>
                                 </div>
@@ -1056,7 +1071,7 @@
                                             <span class="packageTwisty">{{ behaviorCollapsed[group.id] ? '&#9656;' : '&#9662;' }}</span>
                                             <span class="materialGroupName">{{ group.name }}</span>
                                             <span class="materialCount" v-if="behaviorSubTab === 'interactions'">{{ group.rows.length }}</span>
-                                            <span class="materialCount" v-else>{{ group.hidden }} / {{ group.rows.length }} {{ behaviorSubTab === 'animations' ? 'moving' : 'hidden' }}</span>
+                                            <span class="materialCount" v-else>{{ group.hidden }} / {{ group.rows.length }} {{ { animations: 'moving', emissive: 'dark' }[behaviorSubTab] || 'hidden' }}</span>
                                         </div>
                                         <template v-if="!behaviorCollapsed[group.id]">
                                             <div v-for="row in group.rows" v-bind:key="row.id" class="behaviorRow"
@@ -1068,6 +1083,8 @@
                                                     v-on:click="row.node !== undefined && showInspectorNode(row.node)">{{ row.nodeName || '(no node)' }}<span class="behaviorClicks">
                                                         <button v-for="action in row.actions" v-bind:key="action.label" class="behaviorValue" v-bind:title="action.title"
                                                             v-on:click.stop="behaviorInteractionRun.next({ id: row.id, events: action.events })">{{ action.label }}</button></span></span>
+                                                <span v-else-if="behaviorSubTab === 'emissive'" class="behaviorNode" v-bind:title="row.nodeTitle"
+                                                    v-on:click="row.node !== undefined && showInspectorNode(row.node)">{{ row.nodeName || '(no node)' }}<span class="behaviorFrame">{{ row.valueText }}</span></span>
                                                 <span v-else class="behaviorNode" v-bind:title="row.nodeTitle"
                                                     v-on:click="row.node !== undefined && showInspectorNode(row.node)">{{ row.nodeName || '(no node)' }}</span>
                                                 <code class="behaviorCode" v-bind:title="row.codeTitle">{{ row.code }}</code>
