@@ -341,9 +341,29 @@ const getInputObservables = (inputElement, app) => {
 
     // A click that ends an orbit or pan drag is not a selection.
     let mouseDownPosition = { x: 0, y: 0 };
+    // hooks.pointerDown(event) returning true captures the press (e.g. holding a part with
+    // a mouse rect): no orbit, pan or zoom, no selection; moves and the release go to
+    // hooks.pointerMove / hooks.pointerUp. Added before the observables subscribe, so this
+    // runs first.
+    const hooks = { wheel: undefined, pointerDown: undefined, pointerMove: undefined, pointerUp: undefined };
+    let captured = false;
     inputElement.addEventListener("mousedown", (event) => {
         mouseDownPosition = { x: event.pageX, y: event.pageY };
+        captured = hooks.pointerDown?.(event) === true;
     });
+    document.addEventListener("mousemove", (event) => {
+        if (captured && (event.buttons & 7) !== 0) {
+            hooks.pointerMove?.(event);
+        }
+    });
+    const release = (event) => {
+        if (captured) {
+            hooks.pointerUp?.(event);
+            // stays set until the next press, so the click that follows isn't a selection
+        }
+    };
+    document.addEventListener("mouseup", release);
+    document.addEventListener("mouseleave", release);
     // Middle and right clicks (auxclick) are selections too, with their button (most tabs
     // only use the left one).
     const selection = merge(
@@ -352,6 +372,7 @@ const getInputObservables = (inputElement, app) => {
     ).pipe(
         filter(
             (event) =>
+                !captured &&
                 Math.hypot(event.pageX - mouseDownPosition.x, event.pageY - mouseDownPosition.y) <= 4
         ),
         map((clickEvent) => {
@@ -377,7 +398,7 @@ const getInputObservables = (inputElement, app) => {
     );
 
     const mouseOrbit = mouseDown.pipe(
-        filter((event) => event.button === 0 && event.shiftKey === false),
+        filter((event) => !captured && event.button === 0 && event.shiftKey === false),
         mergeMap(() =>
             mouseMove.pipe(
                 pairwise(),
@@ -393,7 +414,7 @@ const getInputObservables = (inputElement, app) => {
     );
 
     const mousePan = mouseDown.pipe(
-        filter((event) => event.button === 1 || event.shiftKey === true),
+        filter((event) => !captured && (event.button === 1 || event.shiftKey === true)),
         mergeMap(() =>
             mouseMove.pipe(
                 pairwise(),
@@ -409,11 +430,10 @@ const getInputObservables = (inputElement, app) => {
     );
 
     const dragZoom = mouseDown.pipe(
-        filter((event) => event.button === 2),
+        filter((event) => !captured && event.button === 2),
         mergeMap(() => mouseMove.pipe(takeUntil(mouseUp))),
         map((mouse) => ({ deltaZoom: mouse.movementY }))
     );
-    const hooks = { wheel: undefined };
     const wheelZoom = fromEvent(inputElement, "wheel").pipe(
         filter((wheelEvent) => hooks.wheel?.(wheelEvent) !== true),
         map((wheelEvent) => normalizeWheel(wheelEvent)),

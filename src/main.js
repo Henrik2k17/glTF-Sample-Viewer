@@ -930,6 +930,8 @@ export default async () => {
         // node index -> interaction entries whose mouse rect is that node
         interactionsByNode: new Map(),
         hovered: undefined, // interaction entry under the cursor
+        // the part held with a mouse button: { entry, button, screen, drag }
+        held: undefined,
         hoverTimer: undefined,
         logId: 0
     };
@@ -1605,7 +1607,10 @@ export default async () => {
         const part = `${entry.itemName} / ${entry.nodeName} — ${events.join(", ")}`;
         // a release or wheel step that did nothing after the same part's event isn't worth a line
         const quiet = result.log.length === 0 && result.errors.length === 0;
-        if (!(quiet && app.behaviorLog[0]?.part.startsWith(`${entry.itemName} / ${entry.nodeName} — `))) {
+        if (events.length === 1 && events[0] === "LeftDrag" && app.behaviorLog[0]?.part === part) {
+            // one line per drag: the latest step replaces the one before
+            app.behaviorLog = [{ ...app.behaviorLog[0], lines: result.log, error: result.errors[0] }, ...app.behaviorLog.slice(1)];
+        } else if (!(quiet && app.behaviorLog[0]?.part.startsWith(`${entry.itemName} / ${entry.nodeName} — `))) {
             app.behaviorLog = [
                 { id: ++behavior.logId, part, lines: result.log, error: result.errors[0] },
                 ...app.behaviorLog
@@ -1655,6 +1660,80 @@ export default async () => {
         }
     });
 
+    // Holding a part: the press events run on mouse down (LeftSingle, Lock), LeftDrag while
+    // the mouse moves (M:RelativeX / Y follow the pointer, in part radii from its centre)
+    // and the release events on mouse up (LeftRelease, Unlock), like in the sim. Knobs that
+    // keep turning while held do that in their update code.
+    uiModel.inputHooks.pointerDown = (event) => {
+        const entry = behavior.hovered;
+        if (!behaviorInteractActive() || entry === undefined || behavior.held !== undefined) {
+            return false;
+        }
+        const button = event.button === 1 ? 1 : event.button === 2 ? 2 : 0;
+        const press = eventsOf(entry, ButtonEvents[button].press);
+        const drag = button === 0 && handledEvents(entry).has("leftdrag");
+        if (press.length === 0 && !drag) {
+            return false;
+        }
+        // the part on screen, taken when pressed: the camera doesn't move while it is held
+        const screen = partOnScreen(entry);
+        const held = { entry, button, screen, drag };
+        behavior.held = held;
+        runInteraction(entry, press, heldMouse(held, event));
+        return true;
+    };
+    uiModel.inputHooks.pointerMove = (event) => {
+        const held = behavior.held;
+        if (held === undefined || !held.drag || behavior.data?.interactions[held.entry.id] !== held.entry) {
+            return;
+        }
+        runInteraction(held.entry, ["LeftDrag"], heldMouse(held, event));
+    };
+    uiModel.inputHooks.pointerUp = (event) => {
+        const held = behavior.held;
+        behavior.held = undefined;
+        if (held === undefined || behavior.data?.interactions[held.entry.id] !== held.entry) {
+            return;
+        }
+        runInteraction(held.entry, eventsOf(held.entry, ButtonEvents[held.button].release), heldMouse(held, event));
+    };
+
+    /** M:RelativeX / Y of the pointer: from the part's centre on screen, in part radii (right / up). */
+    const heldMouse = (held, event) =>
+        held.screen === undefined
+            ? { relativeX: 0, relativeY: 0 }
+            : {
+                  relativeX: (event.clientX - held.screen.x) / held.screen.radius,
+                  relativeY: (held.screen.y - event.clientY) / held.screen.radius
+              };
+
+    /**
+     * The part's centre on screen (client CSS pixels) and half its width in pixels, the units
+     * of M:RelativeX / Y (like relativeMouse for a picked position). Undefined behind the camera.
+     */
+    function partOnScreen(entry) {
+        const min = [0, 0, 0];
+        const max = [0, 0, 0];
+        Msfs.getNodeExtents(state.gltf, entry.node, min, max);
+        if (min[0] === Number.POSITIVE_INFINITY) {
+            return undefined;
+        }
+        const camera = state.userCamera.getTransformMatrix();
+        const delta = [0, 1, 2].map((i) => (min[i] + max[i]) / 2 - camera[12 + i]);
+        const along = (offset) => delta[0] * camera[offset] + delta[1] * camera[offset + 1] + delta[2] * camera[offset + 2];
+        const depth = -along(8);
+        if (depth <= 1e-6) {
+            return undefined;
+        }
+        const rect = canvas.getBoundingClientRect();
+        const focal = rect.height / 2 / Math.tan((state.userCamera.perspective?.yfov ?? Math.PI / 4) / 2);
+        return {
+            x: rect.left + rect.width / 2 + (along(0) / depth) * focal,
+            y: rect.top + rect.height / 2 - (along(4) / depth) * focal,
+            radius: Math.max(((max[0] - min[0]) / 2 / depth) * focal, 2)
+        };
+    }
+
     // The wheel over a clickable part runs its code (no zoom).
     uiModel.inputHooks.wheel = (event) => {
         const entry = behavior.hovered;
@@ -1690,7 +1769,7 @@ export default async () => {
         // one pick per rest
         state.hoverPositions[0].x = undefined;
         state.hoverPositions[0].y = undefined;
-        if (behaviorInteractActive()) {
+        if (behaviorInteractActive() && behavior.held === undefined) {
             setBehaviorHover(interactionOfNode(pickingResult.node?.gltfObjectIndex));
         }
     };
