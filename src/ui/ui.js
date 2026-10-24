@@ -61,6 +61,10 @@ const appCreated = createApp({
             materialTextureOpened: new Subject(),
             textureViewerChanged: new Subject(),
             modelReloadRequested: new Subject(),
+            exportGlbRequested: new Subject(),
+            exportTextureSize: 0, // largest exported texture side, 0: as loaded
+            exportStatus: "",
+            exporting: false,
             textureFolderAdd: new Subject(),
             textureFolderRemove: new Subject(),
             textureFolderMove: new Subject(),

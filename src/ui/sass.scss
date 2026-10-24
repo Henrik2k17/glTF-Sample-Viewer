@@ -860,6 +860,12 @@ input:invalid {
     white-space: pre;
 }
 
+/* Export (Models tab) */
+.modelExport {
+    margin-top: 1.5em;
+    .button { margin-bottom: 0.5em; }
+}
+
 /* Texture lookup folders (Models tab) */
 .textureFolders {
     margin-top: 1.5em;

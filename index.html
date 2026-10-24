@@ -239,6 +239,27 @@
                                     </b-select>
                                 </b-field>
 
+                                <!-- Export of the shown model as a standard GLB (e.g. for Blender) -->
+                                <div class="modelExport">
+                                    <label class="label">Export for Blender</label>
+                                    <p class="textureFoldersInfo">
+                                        Saves what the view shows as a standard .glb: the visible parts in their current pose, with node animations and skins.
+                                        Textures become PNG, normal maps OpenGL; MSFS-only material features are left out.
+                                    </p>
+                                    <b-field label="Max texture size">
+                                        <b-select v-model.number="exportTextureSize" v-bind:disabled="exporting" expanded>
+                                            <option v-bind:value="0">As loaded</option>
+                                            <option v-bind:value="4096">4096</option>
+                                            <option v-bind:value="2048">2048</option>
+                                            <option v-bind:value="1024">1024</option>
+                                            <option v-bind:value="512">512</option>
+                                        </b-select>
+                                    </b-field>
+                                    <button class="button is-small is-rounded is-outlined" v-bind:disabled="exporting"
+                                        v-on:click="exportGlbRequested.next(exportTextureSize)">Export .glb</button>
+                                    <p class="packageStatus" v-if="exportStatus">{{ exportStatus }}</p>
+                                </div>
+
                                 <!-- Texture lookup folders: searched for textures the model doesn't ship with -->
                                 <div class="textureFolders">
                                     <label class="label">Texture folders</label>

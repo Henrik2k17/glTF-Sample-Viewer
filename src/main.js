@@ -2405,6 +2405,40 @@ export default async () => {
         if (typeof mainFile === "string") return decodeURIComponent(mainFile.split(/[?#]/)[0].split("/").pop());
         return mainFile?.name ?? "model.gltf";
     }
+    // Export for Blender: what the view shows as a standard GLB (see GltfView.exportGlb)
+    app.exportGlbRequested.subscribe(async (maxTextureSize) => {
+        if (app.exporting) {
+            return;
+        }
+        if (state.gltf === undefined || state.gltf === emptyGltf) {
+            app.warn("Load a model first.");
+            return;
+        }
+        const preset = app.packagePresets.find((p) => p.id === app.loadedPackagePreset);
+        const baseName = (preset?.title ?? modelFileName().replace(/\.(gltf|glb)$/i, "")).replace(/[\\/:*?"<>|]+/g, "_");
+        app.exporting = true;
+        app.exportStatus = "Exporting…";
+        try {
+            const { blob, warnings } = await view.exportGlb(state, {
+                maxTextureSize,
+                onProgress: ({ done, total }) => {
+                    app.exportStatus = `Writing textures: ${done} / ${total}`;
+                }
+            });
+            const url = URL.createObjectURL(blob);
+            downloadDataURL(`${baseName}.glb`, url);
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+            app.exportStatus = `Exported ${baseName}.glb (${(blob.size / 2 ** 20).toFixed(1)} MB).`;
+            warnings.forEach((warning) => app.warn(warning));
+        } catch (error) {
+            console.error(error);
+            app.exportStatus = "";
+            app.error(`Export failed: ${error?.message ?? error}`);
+        } finally {
+            app.exporting = false;
+        }
+    });
+
     async function buildSavedFiles() {
         const byFile = new Map(); // path -> [{ sourceIndex, doc, toSource }]
         for (const [index, doc] of materialDocs) {
