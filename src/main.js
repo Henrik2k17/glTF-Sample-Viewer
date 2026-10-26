@@ -18,6 +18,7 @@ import {
 } from "./logic/materials.js";
 import { buildMaterialEditor, colorToHex, hexToLinear } from "./logic/msfs_material_editor.js";
 import { readMaterial, writeMaterial, setMaterialType } from "./logic/msfs_material_model.js";
+import { xplaneAnimationDrivers } from "./logic/xplane_datarefs.js";
 import { materialForSource, replaceMaterialsInText, downloadText, writeFilesToDirectory } from "./logic/material_save.js";
 import { buildMsfsAnimationEntries, findAnimationsForNode, getAnimatedTargets } from "./logic/msfs_animations.js";
 import { summarizeValidation } from "./logic/validation_summary.js";
@@ -2419,16 +2420,21 @@ export default async () => {
         app.exporting = true;
         app.exportStatus = "Exporting…";
         try {
+            // which X-Plane dataref drives each behavior animation (see xplane_datarefs.js)
+            const drivers = behavior.data === undefined ? new Map() : xplaneAnimationDrivers(behavior.data, state.gltf);
             const { blob, warnings } = await view.exportGlb(state, {
                 maxTextureSize,
                 onProgress: ({ done, total }) => {
                     app.exportStatus = `Writing textures: ${done} / ${total}`;
-                }
+                },
+                animationExtras: (index) => (drivers.has(index) ? { xplane: drivers.get(index) } : undefined)
             });
             const url = URL.createObjectURL(blob);
             downloadDataURL(`${baseName}.glb`, url);
             setTimeout(() => URL.revokeObjectURL(url), 60000);
-            app.exportStatus = `Exported ${baseName}.glb (${(blob.size / 2 ** 20).toFixed(1)} MB).`;
+            app.exportStatus =
+                `Exported ${baseName}.glb (${(blob.size / 2 ** 20).toFixed(1)} MB)` +
+                (drivers.size > 0 ? `, ${drivers.size} animations with X-Plane datarefs.` : ".");
             warnings.forEach((warning) => app.warn(warning));
         } catch (error) {
             console.error(error);
