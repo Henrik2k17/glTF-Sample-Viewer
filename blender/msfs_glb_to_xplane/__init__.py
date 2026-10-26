@@ -2,6 +2,7 @@
 XPlane2Blender: one OBJ per texture set, X-Plane textures, and the animations the export mapped
 to datarefs (gear, flight controls, ...). See textures.py and animation.py."""
 
+import math
 import os
 
 import bpy
@@ -21,6 +22,18 @@ bl_info = {
     "location": "File > Import > MSFS GLB for X-Plane (.glb)",
     "category": "Import-Export",
 }
+
+
+def face_forward(objects):
+    """MSFS models arrive with the nose along Blender's -Y; XPlane2Blender writes +Y as the
+    X-Plane nose direction (-Z). A root empty turned 180 degrees around Z carries the model."""
+    root = bpy.data.objects.new("MSFS_root", None)
+    bpy.context.scene.collection.objects.link(root)
+    root.rotation_euler = (0, 0, math.pi)
+    for obj in objects:
+        if obj.parent is None:
+            obj.parent = root
+    return root
 
 
 class IMPORT_OT_msfs_glb_xplane(bpy.types.Operator, ImportHelper):
@@ -70,6 +83,7 @@ class IMPORT_OT_msfs_glb_xplane(bpy.types.Operator, ImportHelper):
             return {"CANCELLED"}
         objects = [obj for obj in bpy.data.objects if obj not in before]
         node_objects = match_nodes(glb, objects)
+        objects.append(face_forward(objects))
 
         objects += setup_animations(glb, node_objects, objects, self.report)
         objects += separate_mesh_parents(objects)
